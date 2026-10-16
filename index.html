@@ -287,6 +287,18 @@ select.inp { padding-right: 26px; }
 .sheet { position: fixed; right: max(26px, calc(env(safe-area-inset-right, 0px) + 16px)); bottom: calc(var(--bar-h) + 100px + env(safe-area-inset-bottom, 0px)); z-index: 26; width: min(380px, calc(100vw - 32px)); }
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--bar-h) + 24px + env(safe-area-inset-bottom, 0px)); z-index: 70; background: var(--fg); color: var(--bg); padding: 10px 18px; border-radius: 12px; font-weight: 600; font-size: 14px; box-shadow: 0 12px 30px -10px rgba(0,0,0,.5); max-width: calc(100vw - 32px); }
 
+.fluxo .bd { display: flex; flex-direction: column; gap: 18px; }
+.fl-tot { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.fl-tot span { font-size: 16px; font-weight: 600; }
+.fl-tot b { font-family: var(--f-display); font-weight: 300; font-size: clamp(30px, 3.4vw, 44px); line-height: 1; letter-spacing: -.01em; }
+.fl-bar { height: 12px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.fl-bar span { display: block; height: 100%; border-radius: 99px; min-width: 3px; transition: width .3s ease; }
+.fl-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.fl-2 > div { display: flex; flex-direction: column; gap: 2px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); }
+.fl-2 span { font-size: 14px; color: var(--muted); }
+.fl-2 b { font-size: clamp(19px, 2vw, 25px); font-weight: 700; white-space: nowrap; }
+.fl-al { font-family: var(--f-mono); font-size: 12px; color: var(--bad); letter-spacing: .04em; }
+.resumo .stats > div { min-width: 150px; }
 .empty { text-align: center; padding: 36px 20px; color: var(--muted); }
 .callout { border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); background: var(--accent-bg); border-radius: 14px; padding: 14px 18px; font-size: 14.5px; }
 .callout.bad { border-color: color-mix(in srgb, var(--bad) 30%, transparent); background: var(--bad-bg); }
@@ -336,6 +348,11 @@ select.inp { padding-right: 26px; }
   .bar .tr { grid-column: 1 / -1; grid-row: 2; }
   .dre .row { font-size: 15.5px; } .dre .row.tot .v { font-size: 21px; }
   .mesnav span { min-width: 120px; }
+}
+@media (max-width: 560px) {
+  .fl-2 { gap: 10px; } .fl-2 > div { padding: 10px 12px; } .fl-2 b { font-size: 17px; }
+  .resumo .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 14px; } .resumo .stats > div { min-width: 0; }
+  .resumo .sv2 { font-size: 16px; }
 }
 @media (max-width: 380px) { .g4 { grid-template-columns: minmax(0, 1fr); } .ring svg { display: none; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

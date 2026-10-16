@@ -256,16 +256,23 @@
     }
     return { contas: ab.total, futuras: r2(futuras), total: r2(ab.total + futuras) };
   }
+  function painelFluxo(titulo, mesNome, linhas, frac, cor, alerta) {
+    const [tot, feito, falta] = linhas;
+    return `<section class="card fluxo"><div class="hd"><span class="eyebrow">${titulo} · ${esc(mesNome)}</span><span class="chip">${pct(frac)} ${titulo === 'Entradas' ? 'recebido' : 'pago'}</span></div>
+      <div class="bd">
+        <div class="fl-tot"><span>${tot[0]}</span><b class="num">${brl(tot[1])}</b></div>
+        <div class="fl-bar" role="img" aria-label="${pct(frac)}"><span style="width:${Math.min(100, frac * 100)}%;background:${cor}"></span></div>
+        <div class="fl-2">
+          <div><span>${feito[0]}</span><b class="num ${feito[2]}">${brl(feito[1])}</b></div>
+          <div><span>${falta[0]}</span><b class="num ${falta[2]}">${brl(falta[1])}</b></div>
+        </div>
+        ${alerta ? `<div class="fl-al">${esc(alerta)}</div>` : ''}
+      </div></section>`;
+  }
   function devoHTML() {
     const ab = emAberto(); const dv = dividas(); const totD = dv.reduce((a, d) => a + d.atual, 0);
-    return `<section class="card"><div class="hd"><span class="eyebrow">Quanto eu devo agora</span><span class="chip">cai sempre que você marca Pago</span></div>
+    return `<section class="card"><div class="hd"><span class="eyebrow">Dívidas parceladas</span><span class="chip">${brl(totD)} · cai quando você marca Pago</span></div>
       <div class="bd" style="display:flex;flex-direction:column;gap:20px">
-        <div class="stats">
-          <div><span class="eyebrow">Vencido sem pagar</span><span class="sv2 ${ab.atrasado ? 'neg' : 'pos'}">${brl(ab.atrasado)}</span></div>
-          <div><span class="eyebrow">Ainda vence em ${NOMES_MES[+mesAtual().slice(5) - 1]}</span><span class="sv2">${brl(ab.mes)}</span></div>
-          <div><span class="eyebrow">Total em aberto no mês</span><span class="sv2">${brl(ab.total)}</span></div>
-          <div><span class="eyebrow">Dívidas parceladas</span><span class="sv2">${brl(totD)}</span></div>
-        </div>
         ${dv.length ? `<div class="bars">${dv.map(d => `<div class="bar"><span class="bn">${esc(d.nome)}<small>${d.parcTotal ? `${d.pagasAntes + d.nPagas} de ${d.parcTotal} pagas · ` : ''}${d.restam != null ? `${d.restam} restante${d.restam === 1 ? '' : 's'}` : d.noCartao ? 'parcelas no cartão' : 'saldo devedor'}${d.fim ? ' · até ' + curto(d.fim) : ''}${d.conferir ? ' · conferir saldo' : ''}</small></span><span class="tr" title="${pct(1 - d.atual / (d.total || 1))} quitado"><span class="fl" style="width:${(d.atual / (d.total || 1)) * 100}%;background:var(--s2)"></span></span><span class="bv">${fmt(d.atual)}<small>${d.total > d.atual ? fmt(d.total - d.atual) + ' já pago' : 'nada abatido ainda'}</small></span></div>`).join('')}</div>` : ''}
       </div></section>`;
   }
@@ -641,18 +648,16 @@
     const garg = gargalos().slice(0, 3);
     const passado = m < mesAtual();
     return `${pageHead(`Olá${UI.pessoa ? ', ' + esc(UI.pessoa.split(' ')[0]) : ''}. Hoje é ${diaSemana(hoje())}, ${dataBR(hoje())}.`, 'O que entra, o que sai e o que precisa de atenção agora.', true)}
-    ${(() => { const dt = devoTotal(); return `<div class="grid g4">
-      <div class="card kpi"><div class="t"><span class="l">Já recebi</span></div><div class="big num pos">${brl(r.recebido)}</div><div class="sub">${r.receitaTotal ? pct(r.recebido / r.receitaTotal) + ' do contratado em ' + curto(m) : 'nada contratado em ' + curto(m)}</div></div>
-      <div class="card kpi"><div class="t"><span class="l">Falta receber</span></div><div class="big num">${brl(r.aReceber)}</div><div class="sub">${r.atrasadoReceber ? `<span class="warn">${brl(r.atrasadoReceber)} com data passada</span>` : r.aReceber ? 'ainda vai entrar no mês' : 'tudo recebido'}</div></div>
-      <div class="card kpi"><div class="t"><span class="l">Falta pagar no mês</span></div><div class="big num ${r.aPagar ? 'neg' : 'pos'}">${brl(r.aPagar)}</div><div class="sub">já paguei ${brl(r.pago)}${r.atrasadoPagar ? ` · <span class="neg">${brl(r.atrasadoPagar)} vencido</span>` : ''}</div></div>
-      <div class="card kpi"><div class="t"><span class="l">Devo no total</span></div><div class="big num">${brl(dt.total)}</div><div class="sub">contas em aberto ${k(dt.contas)} + parcelas futuras ${k(dt.futuras)}</div></div>
-    </div>`; })()}
     <div class="grid g2">
-      <div class="card kpi"><div class="t"><span class="l">Caixa hoje</span></div>
-        ${UI.editCaixa ? `<form data-form="caixa" class="form" style="grid-template-columns:1fr auto;margin-top:6px"><input class="inp v" style="max-width:none" id="inp-caixa" inputmode="decimal" value="${caixa != null ? fmt(caixa) : ''}" placeholder="0,00" aria-label="Saldo em conta hoje"><button class="btn pri sm" type="submit">Salvar</button></form>`
-        : `<div class="big num">${caixa != null ? brl(+caixa) : '—'}</div><div class="sub">${caixa != null ? 'informado em ' + dataBR(G().caixaEm || hoje()) : 'some o saldo das contas'} · <button class="link" type="button" data-act="caixa-editar">${caixa != null ? 'atualizar' : 'informar'}</button></div>`}</div>
-      <div class="card kpi"><div class="t"><span class="l">Fim do mês previsto</span></div><div class="big num ${fimPrev < 0 ? 'neg' : 'pos'}">${brl(fimPrev)}</div><div class="sub">${caixa != null ? 'caixa + a receber − a pagar' : 'sem caixa informado, parte de zero'}</div></div>
+      ${painelFluxo('Entradas', nomeMes(m), [['Faturamento total', r.receitaTotal, ''], ['Já recebi', r.recebido, 'pos'], ['Falta receber', r.aReceber, r.aReceber ? 'warn' : 'pos']], r.receitaTotal ? r.recebido / r.receitaTotal : 0, 'var(--good)', r.atrasadoReceber ? `${brl(r.atrasadoReceber)} com data passada` : '')}
+      ${painelFluxo('Saídas', nomeMes(m), [['Despesa total', r.custoTotal, ''], ['Já paguei', r.pago, 'pos'], ['Falta pagar', r.aPagar, r.aPagar ? 'neg' : 'pos']], r.custoTotal ? r.pago / r.custoTotal : 0, 'var(--s2)', r.atrasadoPagar ? `${brl(r.atrasadoPagar)} já venceu e não foi pago` : '')}
     </div>
+    <section class="card resumo"><div class="bd"><div class="stats" style="justify-content:space-between">
+      <div><span class="eyebrow">Resultado do mês</span><span class="sv2 ${r.receitaTotal - r.custoTotal < 0 ? 'neg' : 'pos'}">${brl(r.receitaTotal - r.custoTotal)}</span><span class="faint" style="font-size:12.5px">faturamento − despesa</span></div>
+      <div><span class="eyebrow">Caixa hoje</span>${UI.editCaixa ? `<form data-form="caixa" style="display:flex;gap:8px;margin-top:2px"><input class="inp v" id="inp-caixa" inputmode="decimal" value="${caixa != null ? fmt(caixa) : ''}" placeholder="0,00" aria-label="Saldo em conta hoje"><button class="btn pri sm" type="submit">Salvar</button></form>` : `<span class="sv2">${caixa != null ? brl(+caixa) : '—'}</span><button class="link" type="button" data-act="caixa-editar" style="align-self:flex-start">${caixa != null ? 'atualizar' : 'informar'}</button>`}</div>
+      <div><span class="eyebrow">Fim do mês previsto</span><span class="sv2 ${fimPrev < 0 ? 'neg' : 'pos'}">${brl(fimPrev)}</span><span class="faint" style="font-size:12.5px">caixa + falta receber − falta pagar</span></div>
+      <div><span class="eyebrow">Devo no total</span><span class="sv2">${brl(devoTotal().total)}</span><span class="faint" style="font-size:12.5px">contas do mês + dívidas parceladas</span></div>
+    </div></div></section>
     ${devoHTML()}
     <div class="grid g2">
       <section class="card"><div class="hd"><span class="eyebrow">Como ${nomeMes(m)} ${passado ? 'fechou' : 'está fechando'}</span><span class="chip">${r.its.filter(i => i.st === 'feito' || i.st === 'auto').length} de ${r.its.length} marcados</span></div>
