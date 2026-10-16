@@ -171,6 +171,13 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .btn.danger { color: var(--bad); }
 .btn[disabled] { opacity: .45; cursor: not-allowed; }
 button.link { border: none; background: none; padding: 0; color: var(--accent); font-weight: 600; font-size: 13.5px; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.tg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 11px; overflow: hidden; flex: none; }
+.tg button { border: none; background: none; padding: 7px 12px; font-size: 13px; font-weight: 600; color: var(--faint); white-space: nowrap; }
+.tg button + button { border-left: 1px solid var(--line-2); }
+.tg button[aria-pressed="false"]:hover { color: var(--fg); background: var(--surface-2); }
+.tg button[aria-pressed="true"] { cursor: default; }
+.tg .tg-p[aria-pressed="true"] { background: var(--bad-bg); color: var(--bad); }
+.tg .tg-ok[aria-pressed="true"] { background: var(--good-bg); color: var(--good); }
 .row-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
 
 /* tabelas */

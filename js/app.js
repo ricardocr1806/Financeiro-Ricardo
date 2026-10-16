@@ -173,7 +173,6 @@
   function status(it) {
     const d = diffDias(hoje(), it.data); it.em = d;
     if (it.feito) it.st = 'feito';
-    else if (it.auto && d <= 0) it.st = 'auto';
     else if (d < 0) { it.st = 'atrasado'; it.atraso = -d; }
     else if (d === 0) it.st = 'hoje';
     else if (d <= 7) it.st = 'breve';
@@ -217,6 +216,42 @@
       }
     }
     return r;
+  }
+  // Saldo das dívidas parceladas: parte do saldo no mês de início e abate cada parcela marcada como paga.
+  function dividas() {
+    const out = [];
+    for (const [id, c] of Object.entries(S.config.contas)) {
+      if (c.saldo == null) continue;
+      let pago = 0, nPagas = 0;
+      for (const [m, md] of Object.entries(S.meses)) {
+        if (!md.pagos || !md.pagos[id] || m < (c.inicio || inicio())) continue;
+        const v = c.parcelas ? (+c.parcelas[m] || 0) : valorConta(id, c, m);
+        pago += v; if (v) nPagas++;
+      }
+      const atual = Math.max(0, r2(c.saldo - pago));
+      const parcela = c.parcelas ? null : +c.valor || 0;
+      out.push({ id, nome: c.rotuloDivida || c.nome, inicial: +c.saldo, atual, pago: r2(pago), nPagas, restam: parcela ? Math.ceil(atual / parcela - 0.001) : null, fim: c.fim || (c.parcelas ? Object.keys(c.parcelas).sort().pop() : null), conferir: c.saldoConferir });
+    }
+    return out.sort((a, b) => b.atual - a.atual);
+  }
+  function emAberto() {
+    let atrasado = 0, mes = 0;
+    for (const it of pendentesAtrasados()) if (it.tipo === 'pagar') atrasado += it.valor;
+    for (const it of compromissos(mesAtual())) if (it.tipo === 'pagar' && it.st !== 'feito' && it.st !== 'atrasado') mes += it.valor;
+    return { atrasado: r2(atrasado), mes: r2(mes), total: r2(atrasado + mes) };
+  }
+  function devoHTML() {
+    const ab = emAberto(); const dv = dividas(); const totD = dv.reduce((a, d) => a + d.atual, 0);
+    return `<section class="card"><div class="hd"><span class="eyebrow">Quanto eu devo agora</span><span class="chip">cai sempre que você marca Pago</span></div>
+      <div class="bd" style="display:flex;flex-direction:column;gap:20px">
+        <div class="stats">
+          <div><span class="eyebrow">Vencido sem pagar</span><span class="sv2 ${ab.atrasado ? 'neg' : 'pos'}">${brl(ab.atrasado)}</span></div>
+          <div><span class="eyebrow">Ainda vence em ${NOMES_MES[+mesAtual().slice(5) - 1]}</span><span class="sv2">${brl(ab.mes)}</span></div>
+          <div><span class="eyebrow">Total em aberto no mês</span><span class="sv2">${brl(ab.total)}</span></div>
+          <div><span class="eyebrow">Dívidas parceladas</span><span class="sv2">${brl(totD)}</span></div>
+        </div>
+        ${dv.length ? `<div class="bars">${dv.map(d => `<div class="bar"><span class="bn">${esc(d.nome)}<small>${d.restam != null ? `${d.restam} parcela${d.restam === 1 ? '' : 's'} restante${d.restam === 1 ? '' : 's'}` : 'parcelas no cartão'}${d.fim ? ' · até ' + curto(d.fim) : ''}${d.conferir ? ' · conferir saldo' : ''}</small></span><span class="tr" title="${pct(1 - d.atual / (d.inicial || 1))} quitado desde ${curto(inicio())}"><span class="fl" style="width:${(d.atual / (d.inicial || 1)) * 100}%;background:var(--s2)"></span></span><span class="bv">${fmt(d.atual)}<small>${d.pago ? '−' + fmt(d.pago) + ' pago' : 'nada abatido ainda'}</small></span></div>`).join('')}</div>` : ''}
+      </div></section>`;
   }
   function receitaContratada(m) { let t = 0; for (const [id, e] of Object.entries(S.config.entradas)) if (ativo(e, m)) t += valorEntrada(id, e, m); return t; }
   function custoMes(m, cen) {
@@ -541,9 +576,15 @@
       <button class="pill hide-sm" type="button" data-act="caixa-editar" title="Atualizar o saldo em conta">Caixa <b>${caixa != null ? brl(+caixa) : 'informar'}</b></button>
       <span class="pill hide-sm hide-md"><span class="dot ${UI.sync === 'erro' ? 'err' : nuvem ? '' : 'off'}"></span>${UI.sync === 'erro' ? 'Erro ao salvar' : nuvem ? 'Sistema no ar' : 'Salvo no navegador'}</span>`;
   }
+  function chave(it) {
+    const ok = it.st === 'feito';
+    const [a, b] = it.tipo === 'receber' ? ['A receber', 'Recebido'] : ['Pendente', 'Pago'];
+    const at = `data-tipo="${it.tipo}" data-id="${esc(it.id)}" data-m="${it.m}"`;
+    return `<div class="tg" role="group" aria-label="Situação de ${esc(it.nome)}"><button type="button" class="tg-p" ${ok ? `data-act="desfazer" ${at}` : ''} aria-pressed="${!ok}">${a}</button><button type="button" class="tg-ok" ${ok ? '' : `data-act="feito" ${at}`} aria-pressed="${ok}">${b}</button></div>`;
+  }
   function chipStatus(it) {
     if (it.st === 'feito') return `<span class="chip good">${it.tipo === 'receber' ? 'recebido' : 'pago'}${it.feito.em ? ' ' + dataBR(it.feito.em) : ''}</span>`;
-    if (it.st === 'auto') return '<span class="chip good" title="Débito automático: considerado pago na data">débito automático</span>';
+
     if (it.st === 'atrasado') return `<span class="chip bad">atrasado há ${it.atraso} dia${it.atraso > 1 ? 's' : ''}</span>`;
     if (it.st === 'hoje') return `<span class="chip warn">${it.tipo === 'receber' ? 'entra hoje' : 'vence hoje'}</span>`;
     if (it.st === 'breve') return `<span class="chip gold">em ${it.em} dia${it.em > 1 ? 's' : ''}</span>`;
@@ -552,9 +593,7 @@
   function itemLinha(it, opts) {
     opts = opts || {};
     const sub = opts.sub || `${diaSemana(it.data)}, ${dataBR(it.data)}${it.m !== UI.mes && it.m !== mesAtual() ? ' · ' + curto(it.m) : ''}${it.ref && it.ref.conferir ? ' · conferir' : ''}`;
-    const acao = it.st === 'feito'
-      ? `<button class="btn sm" type="button" data-act="desfazer" data-tipo="${it.tipo}" data-id="${esc(it.id)}" data-m="${it.m}">Desfazer</button>`
-      : `<button class="btn sm ok" type="button" data-act="feito" data-tipo="${it.tipo}" data-id="${esc(it.id)}" data-m="${it.m}">${it.tipo === 'receber' ? '✓ Recebi' : '✓ Paguei'}</button>`;
+    const acao = chave(it);
     return `<div class="it"><div class="ic ${it.tipo === 'receber' ? 'in' : 'out'}" aria-hidden="true">${it.tipo === 'receber' ? '↓' : '↑'}</div>
       <div style="min-width:0"><div class="nm">${esc(it.nome)}</div><div class="meta">${sub} ${chipStatus(it)}</div></div>
       <div class="val ${it.tipo === 'receber' ? 'pos' : ''}">${it.tipo === 'receber' ? '+' : '−'}${fmt(it.valor)}</div>
@@ -587,6 +626,7 @@
         : `<div class="big num">${caixa != null ? brl(+caixa) : '—'}</div><div class="sub">${caixa != null ? 'informado em ' + dataBR(G().caixaEm || hoje()) : 'some o saldo das contas'} · <button class="link" type="button" data-act="caixa-editar">${caixa != null ? 'atualizar' : 'informar'}</button></div>`}</div>
       <div class="card kpi"><div class="t"><span class="l">Fim do mês previsto</span></div><div class="big num ${fimPrev < 0 ? 'neg' : 'pos'}">${brl(fimPrev)}</div><div class="sub">${caixa != null ? 'caixa + a receber − a pagar' : 'sem caixa informado, parte de zero'}</div></div>
     </div>
+    ${devoHTML()}
     <div class="grid g2">
       <section class="card"><div class="hd"><span class="eyebrow">Como ${nomeMes(m)} ${passado ? 'fechou' : 'está fechando'}</span><span class="chip">${r.its.filter(i => i.st === 'feito' || i.st === 'auto').length} de ${r.its.length} marcados</span></div>
         <div class="bd"><div class="dre">
@@ -664,9 +704,8 @@
       ${ehConta ? `<td class="v"><span class="chip ${it.prio <= 3 ? 'bad' : it.prio <= 6 ? 'gold' : ''}" title="1 = pagar primeiro">${it.prio || '—'}</span></td>` : ''}
       <td class="v faint">${it.fim ? curto(it.fim) : '—'}</td>
       <td><div class="row-actions">
-        ${itm ? (itm.st === 'feito' ? `<button class="btn sm" type="button" data-act="desfazer" data-tipo="${ehConta ? 'pagar' : 'receber'}" data-id="${id}" data-m="${m}">Desfazer</button>` : `<button class="btn sm ok" type="button" data-act="feito" data-tipo="${ehConta ? 'pagar' : 'receber'}" data-id="${id}" data-m="${m}">${ehConta ? 'Paguei' : 'Recebi'}</button>`) : ''}
+        ${itm ? chave(itm) : ''}
         <button class="btn sm" type="button" data-act="editar" data-k="${kind}:${id}">${editando ? 'Fechar' : 'Editar'}</button>
-        <button class="btn sm danger" type="button" data-act="remover" data-k="${kind}:${id}">${conf ? 'Confirmar' : 'Remover'}</button>
       </div></td></tr>`;
     if (editando) {
       html += `<tr class="edit"><td colspan="${ehConta ? 7 : 6}"><form class="form" data-form="${kind}" data-id="${id}">
@@ -681,7 +720,7 @@
         <label class="check"><input type="checkbox" name="auto" ${it.auto ? 'checked' : ''}> Débito automático</label>` : ''}
         <label class="check"><input type="checkbox" name="conferir" ${it.conferir ? 'checked' : ''}> Valor ou data a conferir</label>
         <label class="f" style="grid-column:1/-1">Observação<input class="inp" name="nota" value="${esc(it.nota || '')}"></label>
-        <div class="row-actions" style="grid-column:1/-1;justify-content:flex-start"><button class="btn pri" type="submit">Salvar</button></div>
+        <div class="row-actions" style="grid-column:1/-1;justify-content:flex-start"><button class="btn pri" type="submit">Salvar</button><button class="btn danger" type="button" data-act="remover" data-k="${kind}:${id}">${conf ? 'Confirmar remoção' : 'Remover'}</button></div>
       </form></td></tr>`;
     }
     return html;
@@ -705,7 +744,7 @@
     <section class="card"><div class="hd"><span class="eyebrow">Fontes de receita em ${nomeMes(m)}</span><button class="btn sm" type="button" data-act="nova-entrada">+ Nova fonte</button></div>
       <div class="bd flush tbl-wrap"><table class="t"><thead><tr><th>Fonte</th><th class="v">Dia</th><th class="v">Valor no mês</th><th>Situação</th><th class="v">Até</th><th></th></tr></thead><tbody>
         ${ativas.map(([id, e]) => linhaEditavel('entrada', id, e, m)).join('')}
-        ${extras.map(i => `<tr><td><b>${esc(i.nome)}</b> <span class="chip">avulso</span></td><td class="v">${+i.data.slice(8)}</td><td class="v">${fmt(i.valor)}</td><td>${chipStatus(i)}</td><td class="v faint">—</td><td><div class="row-actions">${i.st === 'feito' ? `<button class="btn sm" type="button" data-act="desfazer" data-tipo="receber" data-id="${i.id}" data-m="${m}">Desfazer</button>` : `<button class="btn sm ok" type="button" data-act="feito" data-tipo="receber" data-id="${i.id}" data-m="${m}">Recebi</button>`}<button class="btn sm danger" type="button" data-act="remover-extra" data-id="${i.xid}">Remover</button></div></td></tr>`).join('')}
+        ${extras.map(i => `<tr><td><b>${esc(i.nome)}</b> <span class="chip">avulso</span></td><td class="v">${+i.data.slice(8)}</td><td class="v">${fmt(i.valor)}</td><td>${chipStatus(i)}</td><td class="v faint">—</td><td><div class="row-actions">${chave(i)}<button class="btn sm danger" type="button" data-act="remover-extra" data-id="${i.xid}">Remover</button></div></td></tr>`).join('')}
         <tr class="tot"><td>Total</td><td></td><td class="v">${fmt(tot)}</td><td colspan="3"></td></tr>
       </tbody></table></div></section>
     ${inativas.length ? `<section class="card"><div class="hd"><span class="eyebrow">Fora deste mês</span></div><div class="bd flush tbl-wrap"><table class="t"><tbody>${inativas.map(([id, e]) => linhaEditavel('entrada', id, e, m)).join('')}</tbody></table></div></section>` : ''}
@@ -726,12 +765,13 @@
       <div class="card kpi"><span class="l">Vencido sem marcar</span><div class="big num ${r.nAtrasoPagar ? 'neg' : ''}">${brl(r.atrasadoPagar)}</div><div class="sub">${r.nAtrasoPagar} conta${r.nAtrasoPagar === 1 ? '' : 's'}</div></div>
       <div class="card kpi"><span class="l">Falta pagar</span><div class="big num">${brl(r.aPagar)}</div><div class="sub">até o fim de ${NOMES_MES[+m.slice(5) - 1]}</div></div>
     </div>
+    ${devoHTML()}
     <section class="card"><div class="hd"><span class="eyebrow">Contas de ${nomeMes(m)}</span><button class="btn sm" type="button" data-act="nova-conta">+ Nova conta</button></div>
       <div class="bd flush tbl-wrap"><table class="t"><thead><tr><th>Conta</th><th class="v">Dia</th><th class="v">Valor no mês</th><th>Situação</th><th class="v">Prior.</th><th class="v">Até</th><th></th></tr></thead><tbody>
       ${grupos.map(g => { const l = lista.filter(([, c]) => (c.grupo || 'casa') === g).sort((a, b) => a[1].dia - b[1].dia); if (!l.length) return '';
         const tg = l.filter(([, c]) => ativo(c, m)).reduce((a, [id, c]) => a + valorConta(id, c, m), 0);
         return `<tr class="grp"><td colspan="2">${GRUPOS[g]}</td><td class="v">${fmt(tg)}</td><td colspan="4"></td></tr>` + l.map(([id, c]) => linhaEditavel('conta', id, c, m)).join(''); }).join('')}
-      ${extras.length ? `<tr class="grp"><td colspan="7">Avulsos do mês</td></tr>` + extras.map(i => `<tr><td><b>${esc(i.nome)}</b></td><td class="v">${+i.data.slice(8)}</td><td class="v">${fmt(i.valor)}</td><td>${chipStatus(i)}</td><td></td><td></td><td><div class="row-actions">${i.st === 'feito' ? `<button class="btn sm" type="button" data-act="desfazer" data-tipo="pagar" data-id="${i.id}" data-m="${m}">Desfazer</button>` : `<button class="btn sm ok" type="button" data-act="feito" data-tipo="pagar" data-id="${i.id}" data-m="${m}">Paguei</button>`}<button class="btn sm danger" type="button" data-act="remover-extra" data-id="${i.xid}">Remover</button></div></td></tr>`).join('') : ''}
+      ${extras.length ? `<tr class="grp"><td colspan="7">Avulsos do mês</td></tr>` + extras.map(i => `<tr><td><b>${esc(i.nome)}</b></td><td class="v">${+i.data.slice(8)}</td><td class="v">${fmt(i.valor)}</td><td>${chipStatus(i)}</td><td></td><td></td><td><div class="row-actions">${chave(i)}<button class="btn sm danger" type="button" data-act="remover-extra" data-id="${i.xid}">Remover</button></div></td></tr>`).join('') : ''}
       <tr class="tot"><td>Total</td><td></td><td class="v">${fmt(r.custoTotal)}</td><td colspan="4"></td></tr>
       </tbody></table></div></section>`;
   }
@@ -1032,9 +1072,10 @@
     switch (a) {
       case 'menu': UI.menu = !UI.menu; render(); break;
       case 'mes': UI.mes = addMes(UI.mes, +d.d); UI.diaSel = null; UI.catSel = null; render(); break;
-      case 'feito': marcar(d.tipo, d.id, d.m, true); toast(d.tipo === 'receber' ? 'Marcado como recebido.' : 'Marcado como pago.'); render(); break;
-      case 'desfazer': marcar(d.tipo, d.id, d.m, false); render(); break;
+      case 'feito': marcar(d.tipo, d.id, d.m, true); toast(d.tipo === 'receber' ? 'Marcado como recebido.' : `Pago. Em aberto no mês agora: ${brl(emAberto().total)}.`); render(); break;
+      case 'desfazer': marcar(d.tipo, d.id, d.m, false); toast(d.tipo === 'receber' ? 'Voltou para a receber.' : 'Voltou para pendente.'); render(); break;
       case 'conciliar': marcar(d.tipo, d.id, d.m, true, d.em, +d.v); toast('Marcado a partir do extrato.'); render(); break;
+      case 'noop': break;
       case 'tudo-pago': {
         const ms = new Set(); for (const it of pendentesAtrasados()) if (it.tipo === 'pagar') { const md = garantirMes(it.m); if (it.id.startsWith('x:')) md.extras[it.xid].feito = { em: it.data }; else md.pagos[it.id] = { em: it.data }; ms.add(it.m); }
         ms.forEach(salvarMes); toast('Contas vencidas marcadas como pagas na data de vencimento.'); render(); break;
