@@ -863,6 +863,58 @@
     return `<select class="inp sel-cat" data-act-change="recat" ${attrs} aria-label="Categoria">${P.CATEGORIAS.map(c => `<option value="${c.id}" ${c.id === atual ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}</select>`;
   }
 
+  // Quanto faturar por mês para zerar contas em aberto e dívidas em N meses.
+  function quitacao(n, cen, comCarro) {
+    const atual = mesAtual(); const dv = dividas().filter(d => comCarro || d.id !== 'carro');
+    const ids = new Set(dv.map(d => d.id));
+    const parcelaDe = (id, m) => { const c = S.config.contas[id]; if (!c || !ativo(c, m)) return 0; return c.parcelas ? (+c.parcelas[m] || 0) : valorConta(id, c, m); };
+    // em aberto que não é parcela de dívida (contas do mês vencidas ou a vencer)
+    let abertoContas = 0;
+    for (const m of mesesAte(atual)) for (const it of compromissos(m)) {
+      if (it.tipo !== 'pagar' || it.st === 'feito') continue;
+      if (!ids.has(it.id)) abertoContas += it.valor;
+      else if (S.config.contas[it.id].parcelas) abertoContas += Math.max(0, it.valor - parcelaDe(it.id, m)); // fatura do cartão: só as parcelas são dívida
+    }
+    const saldoDividas = dv.reduce((a, d) => a + d.atual, 0);
+    const alvo = abertoContas + saldoDividas;
+    let base = 0, rec = 0;
+    for (let i = 1; i <= n; i++) {
+      const m = addMes(atual, i); const c = custoMes(m, cen).total;
+      let parc = 0; for (const id of ids) parc += parcelaDe(id, m);
+      base += c - parc; rec += receitaContratada(m);
+    }
+    base /= n; rec /= n;
+    const necessario = base + alvo / n;
+    const falta = Math.max(0, necessario - rec);
+    return { n, alvo: r2(alvo), abertoContas: r2(abertoContas), saldoDividas: r2(saldoDividas), base: r2(base), rec: r2(rec), necessario: r2(necessario), falta: r2(falta), porDia: r2(falta / 21), dv };
+  }
+  function quitacaoHTML(cen) {
+    const comCarro = UI.quitCarro !== false;
+    const prazos = [6, 12, 18, 24, 36].map(n => quitacao(n, cen, comCarro));
+    const q12 = prazos[1];
+    const mx = Math.max(...prazos.map(q => q.necessario), 1);
+    return `<section class="card"><div class="hd"><span class="eyebrow">Quanto preciso faturar para quitar tudo</span>
+        <div class="seg" role="group" aria-label="Incluir o carro"><button type="button" data-act="quit-carro" data-v="1" aria-pressed="${comCarro}">Todas as dívidas</button><button type="button" data-act="quit-carro" data-v="0" aria-pressed="${!comCarro}">Sem antecipar o carro</button></div></div>
+      <div class="bd" style="display:flex;flex-direction:column;gap:20px">
+        <div class="fl-tot"><span>Para zerar tudo em 12 meses, faturar por mês</span><b class="num">${brl(q12.necessario)}</b></div>
+        <div class="fl-2" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+          <div><span>Já contratado (média)</span><b class="num">${brl(q12.rec)}</b></div>
+          <div><span>Falta vender por mês</span><b class="num neg">${brl(q12.falta)}</b></div>
+          <div><span>Por dia útil</span><b class="num">${brl(q12.porDia)}</b></div>
+        </div>
+        <div class="stats">
+          <div><span class="eyebrow">Total a quitar</span><span class="sv2">${brl(q12.alvo)}</span></div>
+          <div><span class="eyebrow">Contas em aberto</span><span class="sv2">${brl(q12.abertoContas)}</span></div>
+          <div><span class="eyebrow">Saldo das dívidas</span><span class="sv2">${brl(q12.saldoDividas)}</span></div>
+          <div><span class="eyebrow">Custo do dia a dia</span><span class="sv2">${brl(q12.base)}/mês</span></div>
+        </div>
+      </div>
+      <div class="bd flush tbl-wrap" style="border-top:1px solid var(--line)"><table class="t"><thead><tr><th>Quitar em</th><th class="v">Faturar por mês</th><th class="v">Já contratado</th><th class="v">Falta vender/mês</th><th class="v">Por dia útil</th><th style="min-width:160px"></th></tr></thead><tbody>
+        ${prazos.map(q => `<tr${q.n === 12 ? ' style="background:var(--surface-2)"' : ''}><td><b>${q.n} meses</b> <span class="faint">até ${curto(addMes(mesAtual(), q.n))}</span></td><td class="v"><b>${fmt(q.necessario)}</b></td><td class="v muted">${fmt(q.rec)}</td><td class="v neg">${fmt(q.falta)}</td><td class="v">${fmt(q.porDia)}</td>
+          <td><div class="fl-bar" style="height:8px"><span style="width:${q.necessario / mx * 100}%;background:var(--s2)"></span></div></td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="bd" style="border-top:1px solid var(--line)"><p class="p">Faturamento necessário = custo do dia a dia (contas e cartões sem as parcelas das dívidas) + tudo o que está em aberto dividido pelo número de meses. Entram: ${q12.dv.map(d => `${esc(d.nome)} ${k(d.atual)}`).join(', ')}${comCarro ? '' : '. O carro segue nas parcelas normais e fica dentro do custo do dia a dia'}. Os cenários acima (pausar anúncios e cortes) já entram no cálculo. As próximas parcelas do Pronampe não estão incluídas porque o saldo dos contratos ainda não foi informado.</p></div></section>`;
+  }
   function telaProjecao() {
     const cen = UI.cen; const pr = projecao(12, cen); const ms = pr.meses;
     const base = projecao(12, { vendas: 0 }).meses;
@@ -889,6 +941,7 @@
         <div><span class="eyebrow">Saldo em ${curto(ult.m)}</span><span class="sv2 ${ult.acum < 0 ? 'neg' : 'pos'}">${brl(ult.acum)}</span></div>
         <div><span class="eyebrow">Caixa fica negativo</span><span class="sv2 ${negMes ? 'neg' : 'pos'}">${negMes ? 'em ' + curto(negMes.m) : 'não fica'}</span></div>
       </div></div></section>
+    ${quitacaoHTML(cen)}
     <section class="card"><div class="hd"><span class="eyebrow">Faturamento previsto × gastos</span><div class="legend"><span><i style="background:var(--s1)"></i>Receita</span><span><i style="background:var(--s2)"></i>Custos</span></div></div><div class="bd">${ch1}</div></section>
     <section class="card"><div class="hd"><span class="eyebrow">Resultado de cada mês</span><div class="legend"><span><i style="background:var(--good)"></i>sobra</span><span><i style="background:var(--bad)"></i>falta</span></div></div><div class="bd">${ch2}</div>
       <div class="bd flush tbl-wrap" style="border-top:1px solid var(--line)"><table class="t"><thead><tr><th>Mês</th><th class="v">Contratado</th><th class="v">Vendas</th><th class="v">Custos</th><th class="v">Resultado</th><th class="v">Acumulado</th></tr></thead><tbody>
@@ -1189,6 +1242,7 @@
       case 'nova-conta': { const id = uid('c_'); S.config.contas[id] = { nome: 'Nova conta', valor: 0, dia: 10, grupo: 'casa', prio: 6, atrasoPct: 3, inicio: UI.mes }; salvarContas(); UI.editando = 'conta:' + id; render(); break; }
       case 'nova-entrada': { const id = uid('e_'); S.config.entradas[id] = { nome: 'Nova fonte', valor: 0, dia: 10, inicio: UI.mes }; salvarEntradas(); UI.editando = 'entrada:' + id; render(); break; }
       case 'filtro-cartao': UI.filtroCartao = d.v; UI.catSel = null; render(); break;
+      case 'quit-carro': UI.quitCarro = d.v === '1'; render(); break;
       case 'env-cartao': UI.envCartao = d.v; render(); break;
       case 'escopo': UI.escopo = d.v; UI.catSel = null; render(); break;
       case 'cat': UI.catSel = UI.catSel === d.v ? null : d.v; render(); break;
