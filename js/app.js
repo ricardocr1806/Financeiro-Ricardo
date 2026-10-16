@@ -232,7 +232,7 @@
       const atual = Math.max(0, r2(c.saldo - pago));
       const parcela = c.parcelas ? null : +c.valor || 0;
       const total = c.parcTotal ? c.parcTotal * (+c.valor || 0) : +c.saldo;
-      out.push({ id, nome: c.rotuloDivida || c.nome, inicial: +c.saldo, total, atual, pago: r2(pago), nPagas, pagasAntes: c.pagasAntes || 0, parcTotal: c.parcTotal || null, restam: parcela ? Math.ceil(atual / parcela - 0.001) : null, fim: c.fim || (c.parcelas ? Object.keys(c.parcelas).sort().pop() : null), conferir: c.saldoConferir });
+      out.push({ id, nome: c.rotuloDivida || c.nome, inicial: +c.saldo, total, atual, pago: r2(pago), nPagas, pagasAntes: c.pagasAntes || 0, parcTotal: c.parcTotal || null, noCartao: !!c.parcelas, restam: parcela ? Math.ceil(atual / parcela - 0.001) : null, fim: c.fim || (c.parcelas ? Object.keys(c.parcelas).sort().pop() : null), conferir: c.saldoConferir });
     }
     return out.sort((a, b) => b.atual - a.atual);
   }
@@ -241,6 +241,20 @@
     for (const it of pendentesAtrasados()) if (it.tipo === 'pagar') atrasado += it.valor;
     for (const it of compromissos(mesAtual())) if (it.tipo === 'pagar' && it.st !== 'feito' && it.st !== 'atrasado') mes += it.valor;
     return { atrasado: r2(atrasado), mes: r2(mes), total: r2(atrasado + mes) };
+  }
+  // Total devido sem contar duas vezes: contas em aberto (atrasadas + resto do mês) + saldo das dívidas
+  // menos as parcelas dessas dívidas que já estão dentro das contas em aberto.
+  function devoTotal() {
+    const ab = emAberto(); let futuras = 0;
+    for (const d of dividas()) {
+      const c = S.config.contas[d.id]; let dentro = 0;
+      for (const m of mesesAte(mesAtual())) {
+        if (!ativo(c, m) || (mesDoc(m).pagos || {})[d.id]) continue;
+        dentro += c.parcelas ? (+c.parcelas[m] || 0) : valorConta(d.id, c, m);
+      }
+      futuras += Math.max(0, d.atual - dentro);
+    }
+    return { contas: ab.total, futuras: r2(futuras), total: r2(ab.total + futuras) };
   }
   function devoHTML() {
     const ab = emAberto(); const dv = dividas(); const totD = dv.reduce((a, d) => a + d.atual, 0);
@@ -252,7 +266,7 @@
           <div><span class="eyebrow">Total em aberto no mês</span><span class="sv2">${brl(ab.total)}</span></div>
           <div><span class="eyebrow">Dívidas parceladas</span><span class="sv2">${brl(totD)}</span></div>
         </div>
-        ${dv.length ? `<div class="bars">${dv.map(d => `<div class="bar"><span class="bn">${esc(d.nome)}<small>${d.parcTotal ? `${d.pagasAntes + d.nPagas} de ${d.parcTotal} pagas · ` : ''}${d.restam != null ? `${d.restam} restante${d.restam === 1 ? '' : 's'}` : 'parcelas no cartão'}${d.fim ? ' · até ' + curto(d.fim) : ''}${d.conferir ? ' · conferir saldo' : ''}</small></span><span class="tr" title="${pct(1 - d.atual / (d.total || 1))} quitado"><span class="fl" style="width:${(d.atual / (d.total || 1)) * 100}%;background:var(--s2)"></span></span><span class="bv">${fmt(d.atual)}<small>${d.total > d.atual ? fmt(d.total - d.atual) + ' já pago' : 'nada abatido ainda'}</small></span></div>`).join('')}</div>` : ''}
+        ${dv.length ? `<div class="bars">${dv.map(d => `<div class="bar"><span class="bn">${esc(d.nome)}<small>${d.parcTotal ? `${d.pagasAntes + d.nPagas} de ${d.parcTotal} pagas · ` : ''}${d.restam != null ? `${d.restam} restante${d.restam === 1 ? '' : 's'}` : d.noCartao ? 'parcelas no cartão' : 'saldo devedor'}${d.fim ? ' · até ' + curto(d.fim) : ''}${d.conferir ? ' · conferir saldo' : ''}</small></span><span class="tr" title="${pct(1 - d.atual / (d.total || 1))} quitado"><span class="fl" style="width:${(d.atual / (d.total || 1)) * 100}%;background:var(--s2)"></span></span><span class="bv">${fmt(d.atual)}<small>${d.total > d.atual ? fmt(d.total - d.atual) + ' já pago' : 'nada abatido ainda'}</small></span></div>`).join('')}</div>` : ''}
       </div></section>`;
   }
   function receitaContratada(m) { let t = 0; for (const [id, e] of Object.entries(S.config.entradas)) if (ativo(e, m)) t += valorEntrada(id, e, m); return t; }
@@ -627,9 +641,13 @@
     const garg = gargalos().slice(0, 3);
     const passado = m < mesAtual();
     return `${pageHead(`Olá${UI.pessoa ? ', ' + esc(UI.pessoa.split(' ')[0]) : ''}. Hoje é ${diaSemana(hoje())}, ${dataBR(hoje())}.`, 'O que entra, o que sai e o que precisa de atenção agora.', true)}
-    <div class="grid g4">
-      <div class="card kpi"><div class="t"><span class="l">Ainda a receber</span></div><div class="big num">${brl(r.aReceber)}</div><div class="sub">${r.atrasadoReceber ? `<span class="warn">${brl(r.atrasadoReceber)} com data passada</span>` : 'tudo o que já está contratado'}</div></div>
-      <div class="card kpi"><div class="t"><span class="l">Ainda a pagar</span></div><div class="big num">${brl(r.aPagar)}</div><div class="sub">${r.atrasadoPagar ? `<span class="neg">${brl(r.atrasadoPagar)} vencidos sem marcar</span>` : 'contas do mês em aberto'}</div></div>
+    ${(() => { const dt = devoTotal(); return `<div class="grid g4">
+      <div class="card kpi"><div class="t"><span class="l">Já recebi</span></div><div class="big num pos">${brl(r.recebido)}</div><div class="sub">${r.receitaTotal ? pct(r.recebido / r.receitaTotal) + ' do contratado em ' + curto(m) : 'nada contratado em ' + curto(m)}</div></div>
+      <div class="card kpi"><div class="t"><span class="l">Falta receber</span></div><div class="big num">${brl(r.aReceber)}</div><div class="sub">${r.atrasadoReceber ? `<span class="warn">${brl(r.atrasadoReceber)} com data passada</span>` : r.aReceber ? 'ainda vai entrar no mês' : 'tudo recebido'}</div></div>
+      <div class="card kpi"><div class="t"><span class="l">Falta pagar no mês</span></div><div class="big num ${r.aPagar ? 'neg' : 'pos'}">${brl(r.aPagar)}</div><div class="sub">já paguei ${brl(r.pago)}${r.atrasadoPagar ? ` · <span class="neg">${brl(r.atrasadoPagar)} vencido</span>` : ''}</div></div>
+      <div class="card kpi"><div class="t"><span class="l">Devo no total</span></div><div class="big num">${brl(dt.total)}</div><div class="sub">contas em aberto ${k(dt.contas)} + parcelas futuras ${k(dt.futuras)}</div></div>
+    </div>`; })()}
+    <div class="grid g2">
       <div class="card kpi"><div class="t"><span class="l">Caixa hoje</span></div>
         ${UI.editCaixa ? `<form data-form="caixa" class="form" style="grid-template-columns:1fr auto;margin-top:6px"><input class="inp v" style="max-width:none" id="inp-caixa" inputmode="decimal" value="${caixa != null ? fmt(caixa) : ''}" placeholder="0,00" aria-label="Saldo em conta hoje"><button class="btn pri sm" type="submit">Salvar</button></form>`
         : `<div class="big num">${caixa != null ? brl(+caixa) : '—'}</div><div class="sub">${caixa != null ? 'informado em ' + dataBR(G().caixaEm || hoje()) : 'some o saldo das contas'} · <button class="link" type="button" data-act="caixa-editar">${caixa != null ? 'atualizar' : 'informar'}</button></div>`}</div>
@@ -880,7 +898,7 @@
     <label class="drop" id="drop" for="file">
       <div class="ico"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 15v4.5h14V15"/></svg></div>
       <h2>Solte as faturas aqui</h2>
-      <p>Funciona com CSV e PDF do Nubank, CSV do Sicredi, OFX de qualquer banco e CSV genérico com colunas de data, descrição e valor. Pode mandar vários de uma vez.</p>
+      <p>Funciona com CSV e PDF do Nubank, CSV do Sicredi, extratos em Excel, OFX de qualquer banco e CSV genérico com colunas de data, descrição e valor. Pode mandar vários de uma vez.</p>
       <span class="btn pri" style="margin-top:6px">Escolher arquivos</span>
     </label>
     ${UI.importados.map((f, i) => importadoHTML(f, i)).join('')}
@@ -1145,7 +1163,7 @@
     switch (a) {
       case 'menu': UI.menu = !UI.menu; render(); break;
       case 'mes': UI.mes = addMes(UI.mes, +d.d); UI.diaSel = null; UI.catSel = null; render(); break;
-      case 'feito': marcar(d.tipo, d.id, d.m, true); toast(d.tipo === 'receber' ? 'Marcado como recebido.' : `Pago. Em aberto no mês agora: ${brl(emAberto().total)}.`); render(); break;
+      case 'feito': marcar(d.tipo, d.id, d.m, true); toast(d.tipo === 'receber' ? 'Marcado como recebido.' : `Pago. Falta pagar no mês: ${brl(emAberto().total)} · devo no total: ${brl(devoTotal().total)}.`); render(); break;
       case 'desfazer': marcar(d.tipo, d.id, d.m, false); toast(d.tipo === 'receber' ? 'Voltou para a receber.' : 'Voltou para pendente.'); render(); break;
       case 'conciliar': marcar(d.tipo, d.id, d.m, true, d.em, +d.v); toast('Marcado a partir do extrato.'); render(); break;
       case 'noop': break;
@@ -1262,6 +1280,11 @@
   document.addEventListener('dragover', ev => { if (UI.tab !== 'importar') ev.preventDefault(); });
   document.addEventListener('drop', ev => { if (UI.tab !== 'importar' && ev.dataTransfer && ev.dataTransfer.files.length) { ev.preventDefault(); UI.tab = 'importar'; lerArquivos(ev.dataTransfer.files); } });
   $('#file').addEventListener('change', ev => { lerArquivos(ev.target.files); ev.target.value = ''; });
+  let xlsxP = null;
+  function sheetjs() {
+    if (!xlsxP) { xlsxP = carregarScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js').then(() => window.XLSX); xlsxP.catch(() => { xlsxP = null; }); }
+    return xlsxP;
+  }
   let pdfjsP = null;
   function carregarScript(src) { return new Promise((ok, err) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => err(new Error('Não foi possível carregar o leitor de PDF.')); document.head.appendChild(s); }); }
   function pdfjs() {
@@ -1295,6 +1318,12 @@
           const linhas = await P.pdfParaLinhas(lib, new Uint8Array(await file.arrayBuffer()));
           f = P.parseNubankLinhas(linhas);
           if (!f.itens.length) throw new Error('Não encontrei lançamentos neste PDF. Por enquanto o leitor de PDF entende faturas do Nubank; para outros bancos, exporte em CSV ou OFX.');
+        } else if (/\.xlsx?$/i.test(file.name)) {
+          const X = await sheetjs();
+          const wb = X.read(new Uint8Array(await file.arrayBuffer()), { type: 'array' });
+          const csv = wb.SheetNames.map(n => X.utils.sheet_to_csv(wb.Sheets[n], { FS: ';' })).join('\n');
+          f = P.lerTexto(csv, file.name);
+          if (!f.itens.length) throw new Error('Não encontrei lançamentos na planilha. Ela precisa ter colunas de data, descrição e valor.');
         } else {
           const buf = await file.arrayBuffer();
           let txt = new TextDecoder('utf-8').decode(buf);

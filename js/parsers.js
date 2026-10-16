@@ -292,7 +292,8 @@
       const p = splitCSV(linhas[i], sep).map(normaliza);
       const iD = p.findIndex(x => /^(DATA|DATE|DT)/.test(x));
       const iV = p.findIndex(x => /VALOR|AMOUNT|QUANTIA|MONTANTE/.test(x));
-      const iT = p.findIndex(x => /DESCRI|HISTORICO|TITLE|LANCAMENTO|ESTABELECIMENTO|DETALHE|MEMO/.test(x));
+      let iT = p.findIndex((x, j) => j !== iD && /DESCRI|HISTORICO|TITLE|ESTABELECIMENTO|DETALHE|MEMO/.test(x));
+      if (iT < 0) iT = p.findIndex((x, j) => j !== iD && /LANCAMENTO/.test(x));
       if (iD >= 0 && iV >= 0) { hi = i; cols = { iD, iV, iT: iT >= 0 ? iT : (iD === 0 ? 1 : 0) }; break; }
     }
     const f = { formato: 'CSV', banco: 'generico', itens: [] };
@@ -315,7 +316,10 @@
     if (/Cart[ãa]o Mastercard|Associado\s*;|Cooperativa\s*;/i.test(head)) return parseSicredi(texto);
     if (/^﻿?date,title,amount/i.test(head)) return parseNubankCSV(texto, nomeArquivo);
     const g = parseCSVGenerico(texto);
-    if (/extrato|conta/i.test(nomeArquivo || '')) g.extrato = true;
+    if (/extrato|conta|saldo do dia|d[ée]bito/i.test((nomeArquivo || '') + ' ' + head)) {
+      // Extrato: no arquivo, saída vem negativa. Normalizamos para positivo = saída.
+      g.extrato = true; g.formato = 'Extrato'; g.itens.forEach(i => { i.v = round2(-i.v); });
+    }
     return g;
   }
 
