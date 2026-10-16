@@ -1182,7 +1182,7 @@
         } else {
           const buf = await file.arrayBuffer();
           let txt = new TextDecoder('utf-8').decode(buf);
-          if (txt.includes('�')) txt = new TextDecoder('windows-1252').decode(buf);
+          if (txt.includes(String.fromCharCode(0xFFFD))) txt = new TextDecoder('windows-1252').decode(buf);
           f = P.lerTexto(txt, file.name);
           if (!f.itens.length) throw new Error('Não encontrei lançamentos. O arquivo precisa ter colunas de data, descrição e valor.');
         }
