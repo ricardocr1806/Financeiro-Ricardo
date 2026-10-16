@@ -996,6 +996,29 @@
     <p class="p">Regras gerais brasileiras: o contrato de cada dívida manda, e a tolerância de cada credor varia. Mudar datas de vencimento é gratuito e quase sempre possível, e resolve a maior parte do aperto sem atrasar nada.</p>`;
   }
 
+  // Envelopes: este mês × mês passado, por categoria.
+  function envelopesHTML(tetos, med) {
+    const temFat = m => faturasDoMes(m).length > 0;
+    const este = temFat(UI.mes) ? UI.mes : ultimoMesComFatura();
+    const ant = addMes(este, -1);
+    const filtro = UI.envCartao || 'todos';
+    const somaMes = (m, cats) => itensFaturas(m, filtro === 'sicredi' ? 'sicredi' : 'todos').filter(i => cats.includes(i.cat) && i.esc !== 'empresa').reduce((a, i) => a + i.v, 0);
+    const antReal = temFat(ant) && (filtro === 'todos' || faturaDoMes('sicredi', ant));
+    const antMedia = !antReal && Object.keys(med || {}).length;
+    const vAnt = t => antReal ? somaMes(ant, t.cats) : antMedia ? t.cats.reduce((a, c) => a + (+med[c] || 0), 0) : null;
+    const linhas = tetos.map(t => ({ t, a: vAnt(t), e: r2(somaMes(este, t.cats)) }));
+    const tot = { a: linhas.reduce((x, l) => x + (l.a || 0), 0), e: linhas.reduce((x, l) => x + l.e, 0), teto: tetos.reduce((x, t) => x + t.teto, 0) };
+    const difCel = (a, e) => a == null ? '<td class="v faint">—</td>' : `<td class="v ${e - a > 0.5 ? 'neg' : a - e > 0.5 ? 'pos' : 'muted'}">${e - a > 0.5 ? '▲ ' : a - e > 0.5 ? '▼ ' : ''}${sinal(e - a)}${a > 0 ? ` <span class="faint">(${(e - a >= 0 ? '+' : '') + pct(e / a - 1)})</span>` : ''}</td>`;
+    const cabAnt = antReal ? curto(ant) : `${curto(ant)}*`;
+    return `<section class="card"><div class="hd"><span class="eyebrow">Gasto por categoria · ${curto(ant)} × ${curto(este)}</span>
+        <div class="seg" role="group" aria-label="Cartões"><button type="button" data-act="env-cartao" data-v="todos" aria-pressed="${filtro === 'todos'}">Todos os cartões</button><button type="button" data-act="env-cartao" data-v="sicredi" aria-pressed="${filtro === 'sicredi'}">Só Sicredi</button></div></div>
+      <div class="bd flush tbl-wrap"><table class="t"><thead><tr><th>Categoria</th><th class="v">${cabAnt}</th><th class="v">${curto(este)}</th><th class="v">Diferença</th><th class="v">Teto</th><th>Situação</th></tr></thead><tbody>
+        ${linhas.map(l => `<tr><td><b>${esc(l.t.nome)}</b></td><td class="v">${l.a == null ? '<span class="faint">—</span>' : fmt(l.a)}</td><td class="v"><b>${fmt(l.e)}</b></td>${difCel(l.a, l.e)}<td class="v muted">${fmt(l.t.teto)}</td>
+          <td>${l.e > l.t.teto ? `<span class="chip bad">${fmt(l.e - l.t.teto)} acima</span>` : `<span class="chip good">dentro</span>`}</td></tr>`).join('')}
+        <tr class="tot"><td>Total</td><td class="v">${antReal || antMedia ? fmt(tot.a) : '—'}</td><td class="v">${fmt(tot.e)}</td>${difCel(antReal || antMedia ? tot.a : null, tot.e)}<td class="v">${fmt(tot.teto)}</td><td>${tot.e > tot.teto ? `<span class="chip bad">${fmt(tot.e - tot.teto)} acima</span>` : '<span class="chip good">dentro</span>'}</td></tr>
+      </tbody></table></div>
+      <div class="bd" style="border-top:1px solid var(--line)"><p class="p">▲ vermelho: gastou mais que no mês passado. ▼ verde: gastou menos. ${antReal ? '' : `* ${curto(ant)} ainda não tem faturas importadas: a coluna usa a média de ago–set do briefing, que só tem o Sicredi. Para comparar igual com igual, use <b>Só Sicredi</b>, ou importe as faturas de ${NOMES_MES[+ant.slice(5) - 1]} dos três cartões.`} Use as setas do mês no topo para escolher qual mês comparar.</p></div></section>`;
+  }
   function telaPlano() {
     const pl = S.config.plano || {}; const h = pl.historico || {};
     const mf = ultimoMesComFatura(); const its = itensFaturas(mf);
@@ -1012,7 +1035,7 @@
     const tetos = pl.tetos || [];
     const pend = Object.entries(pl.pendencias || {});
     const caixa = G().caixa != null ? +G().caixa : 0;
-    return `${pageHead('Plano e histórico', 'O que estava no briefing financeiro: meses passados, média das faturas, tetos de gasto, plano de cortes, reserva e pendências.', false)}
+    return `${pageHead('Plano e histórico', 'O que estava no briefing financeiro: meses passados, média das faturas, tetos de gasto, plano de cortes, reserva e pendências.', true)}
     <section class="card"><div class="hd"><span class="eyebrow">Faturas mês a mês</span><span class="legend"><span>real = arquivo importado</span><span>* estimado pela média do briefing</span></span></div>
       <div class="bd flush tbl-wrap"><table class="t"><thead><tr><th>Cartão</th>${meses.map(m => `<th class="v">${curto(m)}</th>`).join('')}</tr></thead><tbody>
         ${cartoes.map(c => `<tr><td>${esc(CARTOES[c])}</td>${meses.map(m => { const x = valorHist(m, c); return `<td class="v">${x ? fmt(x.v) + (x.est ? '*' : '') : '<span class="faint">—</span>'}</td>`; }).join('')}</tr>`).join('')}
@@ -1024,10 +1047,7 @@
         ${linhasCmp.map(x => `<tr><td>${esc(P.CAT[x.c] ? P.CAT[x.c].nome : x.c)}</td><td class="v">${x.m ? fmt(x.m) : '—'}</td><td class="v">${fmt(x.a)}</td><td class="v ${x.a - x.m > 50 ? 'neg' : x.m - x.a > 50 ? 'pos' : 'muted'}">${sinal(x.a - x.m)}</td></tr>`).join('')}
         <tr class="tot"><td>Total</td><td class="v">${fmt(h.mediaSicrediTotal || 0)}</td><td class="v">${fmt(fs.total)}</td><td class="v ${fs.total > (h.mediaSicrediTotal || 0) ? 'neg' : 'pos'}">${sinal(fs.total - (h.mediaSicrediTotal || 0))}</td></tr>
       </tbody></table></div></section>` : ''}
-    ${tetos.length ? `<section class="card"><div class="hd"><span class="eyebrow">Orçamento por envelope · tetos do briefing × ${curto(mf)}</span><span class="chip">todos os cartões, só casa</span></div>
-      <div class="bd"><div class="bars">${tetos.map(t => { const g = r2(somaCat(t.cats)); const over = g > t.teto; const mx = Math.max(t.teto, g, 1);
-        return `<div class="bar"><span class="bn">${esc(t.nome)}<small>teto ${fmt(t.teto)} · média antes ${t.media != null ? fmt(t.media) : '—'}</small></span><span class="tr"><span class="fl" style="width:${Math.min(100, g / mx * 100)}%;background:${over ? 'var(--bad)' : 'var(--good)'}"></span></span><span class="bv ${over ? 'neg' : 'pos'}">${fmt(g)}<small>${over ? '+' + fmt(g - t.teto) + ' acima' : fmt(t.teto - g) + ' abaixo'}</small></span></div>`; }).join('')}</div>
-      <p class="p" style="margin-top:12px">Os gastos lançados nos cartões já estão dentro das faturas. Os envelopes servem para antecipar a fatura, não para somar de novo.</p></div></section>` : ''}
+    ${tetos.length ? envelopesHTML(tetos, med) : ''}
     <div class="grid g2">
       ${(pl.cortes || []).length ? `<section class="card"><div class="hd"><span class="eyebrow">Plano de cortes</span><span class="chip good">${brl(pl.cortes.reduce((a, c) => a + c.mes, 0))}/mês</span></div><div class="bd flush tbl-wrap"><table class="t"><tbody>
         ${pl.cortes.map(c => `<tr><td><b>${esc(c.acao)}</b><span class="nota">${esc(c.como)}</span></td><td class="v">${fmt(c.mes)}</td></tr>`).join('')}
@@ -1146,6 +1166,7 @@
       case 'nova-conta': { const id = uid('c_'); S.config.contas[id] = { nome: 'Nova conta', valor: 0, dia: 10, grupo: 'casa', prio: 6, atrasoPct: 3, inicio: UI.mes }; salvarContas(); UI.editando = 'conta:' + id; render(); break; }
       case 'nova-entrada': { const id = uid('e_'); S.config.entradas[id] = { nome: 'Nova fonte', valor: 0, dia: 10, inicio: UI.mes }; salvarEntradas(); UI.editando = 'entrada:' + id; render(); break; }
       case 'filtro-cartao': UI.filtroCartao = d.v; UI.catSel = null; render(); break;
+      case 'env-cartao': UI.envCartao = d.v; render(); break;
       case 'escopo': UI.escopo = d.v; UI.catSel = null; render(); break;
       case 'cat': UI.catSel = UI.catSel === d.v ? null : d.v; render(); break;
       case 'fab': UI.fab = !UI.fab; renderLayer(); break;
