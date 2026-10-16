@@ -77,13 +77,13 @@
     },
     salvarLocal() { lsSet(KEY, { config: S.config, meses: S.meses, faturas: S.faturas }); },
     assinar() {
-      const db = this.db; const pend = new Set(['contas', 'entradas', 'geral', 'regras', 'meses', 'faturas']);
+      const db = this.db; const pend = new Set(['contas', 'entradas', 'geral', 'regras', 'plano', 'meses', 'faturas']);
       const ok = (k2, snap) => { if (!snap.metadata || !snap.metadata.fromCache) pend.delete(k2); if (!pend.size) S.carregado = true; agendarRender(); };
       const erro = e => { UI.sync = 'erro'; console.warn('db', e); agendarRender(); };
-      for (const k2 of ['contas', 'entradas', 'geral', 'regras']) {
+      for (const k2 of ['contas', 'entradas', 'geral', 'regras', 'plano']) {
         db.doc('config/' + k2).onSnapshot(s => {
           const d = s.exists ? clone(s.data()) : {};
-          S.config[k2] = k2 === 'geral' ? d : (d.itens || {});
+          S.config[k2] = (k2 === 'geral' || k2 === 'plano') ? d : (d.itens || {});
           ok(k2, s);
         }, erro);
       }
@@ -119,12 +119,13 @@
   };
   function aplicar(d) {
     const c = d.config || {};
-    S.config = { contas: c.contas || {}, entradas: c.entradas || {}, geral: c.geral || {}, regras: c.regras || {} };
+    S.config = { contas: c.contas || {}, entradas: c.entradas || {}, geral: c.geral || {}, regras: c.regras || {}, plano: c.plano || {} };
     S.meses = d.meses || {}; S.faturas = d.faturas || {};
   }
   const salvarContas = () => Store.gravar('config/contas', { itens: S.config.contas });
   const salvarEntradas = () => Store.gravar('config/entradas', { itens: S.config.entradas });
   const salvarGeral = () => Store.gravar('config/geral', S.config.geral);
+  const salvarPlano = () => Store.gravar('config/plano', S.config.plano);
   const salvarRegras = () => Store.gravar('config/regras', { itens: S.config.regras });
   const salvarMes = m => Store.gravar('meses/' + m, S.meses[m]);
   const salvarFatura = id => Store.gravar('faturas/' + id, S.faturas[id] || null);
@@ -132,7 +133,7 @@
     const s = clone(window.FIN_SEED); if (!s) return;
     aplicar(s);
     if (Store.modo === 'nuvem') {
-      salvarContas(); salvarEntradas(); salvarGeral(); salvarRegras();
+      salvarContas(); salvarEntradas(); salvarGeral(); salvarRegras(); salvarPlano();
       for (const id of Object.keys(S.faturas)) salvarFatura(id);
     } else Store.salvarLocal();
     toast('Base carregada.'); render();
@@ -230,7 +231,8 @@
       }
       const atual = Math.max(0, r2(c.saldo - pago));
       const parcela = c.parcelas ? null : +c.valor || 0;
-      out.push({ id, nome: c.rotuloDivida || c.nome, inicial: +c.saldo, atual, pago: r2(pago), nPagas, restam: parcela ? Math.ceil(atual / parcela - 0.001) : null, fim: c.fim || (c.parcelas ? Object.keys(c.parcelas).sort().pop() : null), conferir: c.saldoConferir });
+      const total = c.parcTotal ? c.parcTotal * (+c.valor || 0) : +c.saldo;
+      out.push({ id, nome: c.rotuloDivida || c.nome, inicial: +c.saldo, total, atual, pago: r2(pago), nPagas, pagasAntes: c.pagasAntes || 0, parcTotal: c.parcTotal || null, restam: parcela ? Math.ceil(atual / parcela - 0.001) : null, fim: c.fim || (c.parcelas ? Object.keys(c.parcelas).sort().pop() : null), conferir: c.saldoConferir });
     }
     return out.sort((a, b) => b.atual - a.atual);
   }
@@ -250,7 +252,7 @@
           <div><span class="eyebrow">Total em aberto no mês</span><span class="sv2">${brl(ab.total)}</span></div>
           <div><span class="eyebrow">Dívidas parceladas</span><span class="sv2">${brl(totD)}</span></div>
         </div>
-        ${dv.length ? `<div class="bars">${dv.map(d => `<div class="bar"><span class="bn">${esc(d.nome)}<small>${d.restam != null ? `${d.restam} parcela${d.restam === 1 ? '' : 's'} restante${d.restam === 1 ? '' : 's'}` : 'parcelas no cartão'}${d.fim ? ' · até ' + curto(d.fim) : ''}${d.conferir ? ' · conferir saldo' : ''}</small></span><span class="tr" title="${pct(1 - d.atual / (d.inicial || 1))} quitado desde ${curto(inicio())}"><span class="fl" style="width:${(d.atual / (d.inicial || 1)) * 100}%;background:var(--s2)"></span></span><span class="bv">${fmt(d.atual)}<small>${d.pago ? '−' + fmt(d.pago) + ' pago' : 'nada abatido ainda'}</small></span></div>`).join('')}</div>` : ''}
+        ${dv.length ? `<div class="bars">${dv.map(d => `<div class="bar"><span class="bn">${esc(d.nome)}<small>${d.parcTotal ? `${d.pagasAntes + d.nPagas} de ${d.parcTotal} pagas · ` : ''}${d.restam != null ? `${d.restam} restante${d.restam === 1 ? '' : 's'}` : 'parcelas no cartão'}${d.fim ? ' · até ' + curto(d.fim) : ''}${d.conferir ? ' · conferir saldo' : ''}</small></span><span class="tr" title="${pct(1 - d.atual / (d.total || 1))} quitado"><span class="fl" style="width:${(d.atual / (d.total || 1)) * 100}%;background:var(--s2)"></span></span><span class="bv">${fmt(d.atual)}<small>${d.total > d.atual ? fmt(d.total - d.atual) + ' já pago' : 'nada abatido ainda'}</small></span></div>`).join('')}</div>` : ''}
       </div></section>`;
   }
   function receitaContratada(m) { let t = 0; for (const [id, e] of Object.entries(S.config.entradas)) if (ativo(e, m)) t += valorEntrada(id, e, m); return t; }
@@ -326,6 +328,12 @@
       out.push({ sev: 'critico', titulo: `A receita contratada cai ${pct(1 - recP / recA)} em ${NOMES_MES[+prox.slice(5) - 1]}`, numero: '−' + brl(perda),
         texto: `${terminam.map(e => e.nome).join(', ')} encerram em ${curto(atual)}. A receita que já está contratada passa de ${brl(recA)} para ${brl(recP)} por mês.`,
         acao: 'Prospectar para repor esses contratos é a tarefa mais importante de novembro. Cada novo cliente de R$ 2.500 reduz o gap em 10%.' });
+    }
+    const futuras = Object.values(S.config.entradas).filter(e => e.fim && e.fim > atual && e.fim < addMes(atual, 12)).sort((a, b) => a.fim.localeCompare(b.fim));
+    if (futuras.length) {
+      out.push({ sev: 'atencao', titulo: `Mais ${futuras.length > 1 ? futuras.length + ' receitas acabam' : 'uma receita acaba'} nos próximos meses`, numero: '−' + brl(futuras.reduce((a, e) => a + (+e.valor || 0), 0)) + '/mês',
+        texto: futuras.map(e => `${e.nome}: último pagamento em ${curto(e.fim)} (${brl(e.valor)})`).join('. ') + '.',
+        acao: 'Começar agora a conversa de renovação, ou a prospecção para substituir, antes do último pagamento.' });
     }
     const gap = custoP - recP;
     const du = diasUteis(prox + '-01', dataNoMes(prox, 31));
@@ -538,10 +546,11 @@
     importar: '<path d="M7 3.5h7l4 4v13H7z"/><path d="M14 3.5v4h4M10 14l2.5 2.5L15 14M12.5 10.5v6"/>',
     prioridade: '<path d="M12 4 4 8l8 4 8-4-8-4ZM4 12l8 4 8-4M4 16l8 4 8-4"/>',
     gargalos: '<path d="M12 4 3.5 19h17L12 4Z"/><path d="M12 10v4.5M12 17h.01"/>',
+    plano: '<path d="M6 4h12v16H6z"/><path d="M9 8.5h6M9 12h6M9 15.5h3.5"/>',
   };
   const TABS = [
     ['inicio', 'Início'], ['agenda', 'Agenda'], ['recebimentos', 'Recebimentos'], ['contas', 'Contas a pagar'], ['custos', 'Custos'],
-    ['projecao', 'Projeção'], ['importar', 'Importar faturas'], ['prioridade', 'Se faltar dinheiro'], ['gargalos', 'Gargalos'],
+    ['projecao', 'Projeção'], ['importar', 'Importar faturas'], ['prioridade', 'Se faltar dinheiro'], ['gargalos', 'Gargalos'], ['plano', 'Plano e histórico'],
   ];
   function renderNav() {
     const atrasos = S.carregado ? pendentesAtrasados() : [];
@@ -987,6 +996,50 @@
     <p class="p">Regras gerais brasileiras: o contrato de cada dívida manda, e a tolerância de cada credor varia. Mudar datas de vencimento é gratuito e quase sempre possível, e resolve a maior parte do aperto sem atrasar nada.</p>`;
   }
 
+  function telaPlano() {
+    const pl = S.config.plano || {}; const h = pl.historico || {};
+    const mf = ultimoMesComFatura(); const its = itensFaturas(mf);
+    const somaCat = (cs, f) => its.filter(i => cs.includes(i.cat) && i.esc !== 'empresa' && (!f || f(i))).reduce((a, i) => a + i.v, 0);
+    // histórico de faturas por mês
+    const meses = [...new Set([...Object.keys(h.faturas || {}), ...Object.values(S.faturas).filter(f => !f.extrato).map(f => f.mes)])].sort();
+    const cartoes = ['sicredi', 'nubank_laura', 'nubank_ricardo', 'mercadopago'];
+    const valorHist = (m, c) => { const f = faturaDoMes(c, m); if (f) return { v: f.total, real: true }; const x = (h.faturas || {})[m]; return x && x[c] != null ? { v: x[c], est: (x._estimados || []).includes(c) } : null; };
+    // comparativo Sicredi: média ago–set × mês importado
+    const fs = faturaDoMes('sicredi', mf); const med = h.mediaSicredi || {};
+    const atualCat = {};
+    if (fs) for (const i of fs.itens) { if (i.cat === 'ignorar') continue; const pc = P.parcelaDe(i.desc, i.parc); const c = pc && pc.n >= 2 ? 'parcelas' : i.cat; atualCat[c] = (atualCat[c] || 0) + i.v; }
+    const linhasCmp = [...new Set([...Object.keys(med), ...Object.keys(atualCat)])].map(c => ({ c, m: +med[c] || 0, a: r2(atualCat[c] || 0) })).sort((a, b) => b.m - a.m || b.a - a.a);
+    const tetos = pl.tetos || [];
+    const pend = Object.entries(pl.pendencias || {});
+    const caixa = G().caixa != null ? +G().caixa : 0;
+    return `${pageHead('Plano e histórico', 'O que estava no briefing financeiro: meses passados, média das faturas, tetos de gasto, plano de cortes, reserva e pendências.', false)}
+    <section class="card"><div class="hd"><span class="eyebrow">Faturas mês a mês</span><span class="legend"><span>real = arquivo importado</span><span>* estimado pela média do briefing</span></span></div>
+      <div class="bd flush tbl-wrap"><table class="t"><thead><tr><th>Cartão</th>${meses.map(m => `<th class="v">${curto(m)}</th>`).join('')}</tr></thead><tbody>
+        ${cartoes.map(c => `<tr><td>${esc(CARTOES[c])}</td>${meses.map(m => { const x = valorHist(m, c); return `<td class="v">${x ? fmt(x.v) + (x.est ? '*' : '') : '<span class="faint">—</span>'}</td>`; }).join('')}</tr>`).join('')}
+        <tr class="tot"><td>Total conhecido</td>${meses.map(m => `<td class="v">${fmt(cartoes.reduce((a, c) => a + ((valorHist(m, c) || {}).v || 0), 0))}</td>`).join('')}</tr>
+      </tbody></table></div>
+      ${(h.notas || []).length ? `<div class="bd" style="border-top:1px solid var(--line)"><div class="lst">${h.notas.map(n => `<div class="it" style="grid-template-columns:minmax(0,1fr)"><span class="muted">${esc(n)}</span></div>`).join('')}</div></div>` : ''}</section>
+    ${linhasCmp.length && fs ? `<section class="card"><div class="hd"><span class="eyebrow">Fatura Sicredi: média de ago–set × ${curto(mf)}</span><span class="chip ${fs.total > (h.mediaSicrediTotal || 0) ? 'bad' : 'good'}">${curto(mf)} ${pct(fs.total / (h.mediaSicrediTotal || fs.total) - 1)} vs média</span></div>
+      <div class="bd flush tbl-wrap"><table class="t"><thead><tr><th>Categoria</th><th class="v">Média ago–set</th><th class="v">${curto(mf)}</th><th class="v">Diferença</th></tr></thead><tbody>
+        ${linhasCmp.map(x => `<tr><td>${esc(P.CAT[x.c] ? P.CAT[x.c].nome : x.c)}</td><td class="v">${x.m ? fmt(x.m) : '—'}</td><td class="v">${fmt(x.a)}</td><td class="v ${x.a - x.m > 50 ? 'neg' : x.m - x.a > 50 ? 'pos' : 'muted'}">${sinal(x.a - x.m)}</td></tr>`).join('')}
+        <tr class="tot"><td>Total</td><td class="v">${fmt(h.mediaSicrediTotal || 0)}</td><td class="v">${fmt(fs.total)}</td><td class="v ${fs.total > (h.mediaSicrediTotal || 0) ? 'neg' : 'pos'}">${sinal(fs.total - (h.mediaSicrediTotal || 0))}</td></tr>
+      </tbody></table></div></section>` : ''}
+    ${tetos.length ? `<section class="card"><div class="hd"><span class="eyebrow">Orçamento por envelope · tetos do briefing × ${curto(mf)}</span><span class="chip">todos os cartões, só casa</span></div>
+      <div class="bd"><div class="bars">${tetos.map(t => { const g = r2(somaCat(t.cats)); const over = g > t.teto; const mx = Math.max(t.teto, g, 1);
+        return `<div class="bar"><span class="bn">${esc(t.nome)}<small>teto ${fmt(t.teto)} · média antes ${t.media != null ? fmt(t.media) : '—'}</small></span><span class="tr"><span class="fl" style="width:${Math.min(100, g / mx * 100)}%;background:${over ? 'var(--bad)' : 'var(--good)'}"></span></span><span class="bv ${over ? 'neg' : 'pos'}">${fmt(g)}<small>${over ? '+' + fmt(g - t.teto) + ' acima' : fmt(t.teto - g) + ' abaixo'}</small></span></div>`; }).join('')}</div>
+      <p class="p" style="margin-top:12px">Os gastos lançados nos cartões já estão dentro das faturas. Os envelopes servem para antecipar a fatura, não para somar de novo.</p></div></section>` : ''}
+    <div class="grid g2">
+      ${(pl.cortes || []).length ? `<section class="card"><div class="hd"><span class="eyebrow">Plano de cortes</span><span class="chip good">${brl(pl.cortes.reduce((a, c) => a + c.mes, 0))}/mês</span></div><div class="bd flush tbl-wrap"><table class="t"><tbody>
+        ${pl.cortes.map(c => `<tr><td><b>${esc(c.acao)}</b><span class="nota">${esc(c.como)}</span></td><td class="v">${fmt(c.mes)}</td></tr>`).join('')}
+      </tbody></table></div><div class="bd" style="border-top:1px solid var(--line)"><p class="p">A função dos cortes é construir o colchão do dia 15, para que um mês mais fraco não empurre vocês para o rotativo.</p></div></section>` : ''}
+      ${(pl.escada || []).length ? `<section class="card"><div class="hd"><span class="eyebrow">Escada da reserva</span><span class="chip">${G().caixa != null ? 'caixa ' + brl(caixa) : 'informe o caixa'}</span></div><div class="bd"><div class="lst">
+        ${pl.escada.map((e, i) => `<div class="it" style="grid-template-columns:34px minmax(0,1fr) auto"><div class="ic out" style="background:var(--accent-bg);color:var(--accent)">${i}</div><div style="min-width:0"><div class="nm">${esc(e.nome)}</div><div class="meta">${esc(e.oque)}</div>${e.meta ? `<div class="stack" style="height:8px;margin-top:8px"><span style="width:${Math.min(100, caixa / e.meta * 100)}%;background:var(--accent)"></span></div>` : ''}</div><div class="val">${e.meta ? fmt(e.meta) : esc(e.txt || '')}</div></div>`).join('')}
+      </div><p class="p" style="margin-top:10px">Cada etapa só começa quando a anterior fecha. Isto é organização financeira, não recomendação de produto.</p></div></section>` : ''}
+    </div>
+    ${pend.length ? `<section class="card"><div class="hd"><span class="eyebrow">Pendências</span><span class="chip">${pend.filter(([, x]) => x.feito).length} de ${pend.length} resolvidas</span></div><div class="bd"><div class="lst">
+      ${pend.sort((a, b) => (a[1].feito ? 1 : 0) - (b[1].feito ? 1 : 0) || (a[1].ordem || 0) - (b[1].ordem || 0)).map(([id, x]) => `<label class="it check" style="grid-template-columns:22px minmax(0,1fr);cursor:pointer"><input type="checkbox" data-pend="${esc(id)}" ${x.feito ? 'checked' : ''}><span style="${x.feito ? 'text-decoration:line-through;color:var(--faint)' : ''}">${esc(x.txt)}${x.resposta ? `<span class="nota" style="display:block;font-size:12.5px;color:var(--muted);text-decoration:none">${esc(x.resposta)}</span>` : ''}</span></label>`).join('')}
+    </div></div></section>` : ''}`;
+  }
   function telaGargalos() {
     const gs = gargalos();
     const n = { critico: gs.filter(g => g.sev === 'critico').length, atencao: gs.filter(g => g.sev === 'atencao').length };
@@ -1024,7 +1077,7 @@
     const sc = $('#scrim'); if (UI.menu && !sc) { const d = document.createElement('div'); d.className = 'scrim'; d.id = 'scrim'; d.dataset.act = 'menu'; document.body.appendChild(d); } else if (!UI.menu && sc) sc.remove();
     if (!S.carregado) return;
     const vazio = !Object.keys(S.config.contas).length && !Object.keys(S.config.entradas).length;
-    const telas = { inicio: telaInicio, agenda: telaAgenda, recebimentos: telaRecebimentos, contas: telaContas, custos: telaCustos, projecao: telaProjecao, importar: telaImportar, prioridade: telaPrioridade, gargalos: telaGargalos };
+    const telas = { inicio: telaInicio, agenda: telaAgenda, recebimentos: telaRecebimentos, contas: telaContas, custos: telaCustos, projecao: telaProjecao, importar: telaImportar, prioridade: telaPrioridade, gargalos: telaGargalos, plano: telaPlano };
     if (!telas[UI.tab]) UI.tab = 'inicio';
     let html;
     try { html = vazio ? telaVazia() : telas[UI.tab](); }
@@ -1117,6 +1170,7 @@
       if (el.dataset.valmes === 'entrada' && md.recebidos[el.dataset.id]) md.recebidos[el.dataset.id].valor = r2(v);
       salvarMes(UI.mes); toast('Valor de ' + curto(UI.mes) + ' atualizado.'); agendarRender(); return;
     }
+    if (el.dataset.pend) { const pl = S.config.plano || (S.config.plano = {}); const x = (pl.pendencias || {})[el.dataset.pend]; if (x) { x.feito = el.checked; salvarPlano(); agendarRender(); } return; }
     const ac = el.dataset.actChange;
     if (ac === 'recat') {
       const cat = el.value;
