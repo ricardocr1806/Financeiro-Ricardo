@@ -176,8 +176,11 @@ button.link { border: none; background: none; padding: 0; color: var(--accent); 
 .tg button + button { border-left: 1px solid var(--line-2); }
 .tg button[aria-pressed="false"]:hover { color: var(--fg); background: var(--surface-2); }
 .tg button[aria-pressed="true"] { cursor: default; }
+.tg button[data-act="dec"][aria-pressed="false"] { cursor: pointer; }
 .tg .tg-p[aria-pressed="true"] { background: var(--bad-bg); color: var(--bad); }
 .tg .tg-ok[aria-pressed="true"] { background: var(--good-bg); color: var(--good); }
+.tg .tg-n[aria-pressed="true"] { background: var(--accent-bg); color: var(--accent); }
+.tg button[data-act="dec"][aria-pressed="true"] { cursor: default; }
 .row-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
 
 /* tabelas */

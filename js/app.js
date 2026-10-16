@@ -1015,6 +1015,93 @@
       <div class="row-actions"><button class="btn sm ok" type="button" data-act="conciliar" data-tipo="${s.c.tipo}" data-id="${esc(s.c.id)}" data-m="${s.c.m}" data-em="${s.x.d}" data-v="${Math.abs(s.x.v)}">Marcar ${s.c.tipo === 'receber' ? 'recebido' : 'pago'}</button></div></div>`).join('')}</div>`;
   }
 
+  // ---------- plano para atravessar o aperto ----------
+  const DEC_PADRAO = { carro: 'segurar', condominio: 'segurar', walassi: 'negociar', pronampe: 'negociar' };
+  const RISCO = {
+    carro: 'Tem alienação fiduciária: com 2 a 3 parcelas atrasadas o banco pode pedir busca e apreensão. Ligue antes e peça para pausar ou jogar parcelas para o fim. A ajuda de R$ 900 da sua mãe é para o carro: combine com ela.',
+    condominio: 'Vocês alugam: condomínio é encargo do aluguel, e atraso de encargo pode entrar numa ação de despejo junto com o aluguel. Multa de 2% + 1% ao mês. Segure no máximo 1 a 2 meses e avise a administradora.',
+    walassi: 'Pessoa física, sem juros. Converse antes e proponha pausar 2 ou 3 parcelas e esticar o prazo.',
+    pronampe: 'Peça ao gerente do Bradesco renegociação com carência. A conta negativa cobra juros todo mês enquanto não resolve.',
+    plano: 'Até 60 dias o plano não pode ser cancelado (Lei 9.656/98), mas o atendimento pode ser negado no período. Não segure se alguém estiver em tratamento.',
+    terreno: 'Depende do contrato. Ligue e peça para pular parcelas antes de atrasar.',
+    energia: 'Aviso de corte com 15 dias de antecedência. Dá para segurar 1 mês. Não pague parcelado no cartão.',
+    internet: 'Ferramenta de trabalho: pode atrasar 15 a 30 dias, mas não deixe cortar.',
+    aluguel: 'Não segure: é o maior risco (despejo) e o maior valor.',
+    das: 'Multa de 0,33% ao dia até 20%, mais Selic. Dá para parcelar depois no portal do Simples.',
+    mei: 'Mesma regra do DAS. Dá para parcelar depois.',
+    darf: 'Mesma regra do DAS. Dá para parcelar depois.',
+  };
+  function planoConfig() {
+    const pl = S.config.plano || {};
+    return { dec: Object.assign({}, DEC_PADRAO, pl.decisoes || {}), eco: Object.assign({ ads: false, cortes: true, extra: 0, meses: 3 }, pl.economias || {}) };
+  }
+  function planoAperto() {
+    const { dec, eco } = planoConfig(); const atual = mesAtual(); const H = +eco.meses || 3;
+    const acc = {}; let negociado = 0, juros = 0; const meses = [];
+    const previos = pendentesAtrasados().filter(i => i.tipo === 'pagar' && i.m < atual);
+    for (let i = 0; i < H; i++) {
+      const m = addMes(atual, i);
+      // juros do mês sobre o que já foi segurado
+      for (const a of Object.values(acc)) { const j = a.v * a.pct / 100; a.v += j; juros += j; }
+      const its = compromissos(m).filter(it => it.tipo === 'pagar' && (i > 0 || it.st !== 'feito'));
+      if (i === 0) its.push(...previos);
+      let tudo = 0, pago = 0, cartoes = 0, seg = 0, neg = 0, ecoMes = 0;
+      for (const it of its) {
+        let v = it.valor; tudo += v;
+        const c = it.ref || {}; const ehCartao = c.grupo === 'cartao';
+        if (ehCartao) {
+          if (i > 0 && eco.ads && c.cartao === 'nubank_ricardo' && origemValor(it.id, c, m) === 'estimado') { const x = Math.min(v, +G().metaAds || 0); v -= x; ecoMes += x; }
+          cartoes += v; continue;
+        }
+        const d = it.extra ? 'pagar' : (dec[it.id] || 'pagar');
+        if (d === 'segurar') { const a = acc[it.id] || (acc[it.id] = { v: 0, pct: +c.atrasoPct || 3 }); a.v += v; seg += v; }
+        else if (d === 'negociar') { negociado += v; neg += v; }
+        else pago += v;
+      }
+      if (i > 0) { const corte = Math.min(cartoes, (eco.cortes ? +G().cortes || 0 : 0) + (+eco.extra || 0)); cartoes -= corte; ecoMes += corte; }
+      pago += cartoes;
+      const acumulado = Object.values(acc).reduce((a, x) => a + x.v, 0) + negociado;
+      meses.push({ m, tudo: r2(tudo), pago: r2(pago), seg: r2(seg), neg: r2(neg), eco: r2(ecoMes), acumulado: r2(acumulado), rec: receitaContratada(m) });
+    }
+    return { H, meses, juros: r2(juros), acumulado: meses.length ? meses[meses.length - 1].acumulado : 0, dec, eco };
+  }
+  function planoApertoHTML() {
+    const pa = planoAperto(); const { dec, eco } = pa; const m0 = pa.meses[0] || { pago: 0, tudo: 0 };
+    const media = pa.meses.reduce((a, x) => a + x.pago, 0) / (pa.meses.length || 1);
+    const mediaTudo = pa.meses.reduce((a, x) => a + x.tudo, 0) / (pa.meses.length || 1);
+    const atual = mesAtual();
+    const contas = Object.entries(S.config.contas).filter(([, c]) => ativo(c, atual) || ativo(c, addMes(atual, 1))).sort((a, b) => (a[1].prio || 6) - (b[1].prio || 6) || b[1].valor - a[1].valor);
+    const seg = (id, d) => `<div class="tg" role="group" aria-label="Decisão">${[['pagar', 'Pagar'], ['segurar', 'Segurar'], ['negociar', 'Negociar']].map(([v, n]) => `<button type="button" class="${v === 'pagar' ? 'tg-ok' : v === 'segurar' ? 'tg-p' : 'tg-n'}" data-act="dec" data-id="${esc(id)}" data-v="${v}" aria-pressed="${d === v}">${n}</button>`).join('')}</div>`;
+    const ch = chartLinhas({ id: 'aperto', labels: pa.meses.map(x => curto(x.m)), h: 220, aria: 'Quanto pagar por mês com e sem o plano',
+      series: [{ nome: 'Sem plano', cor: 'var(--s2)', valores: pa.meses.map(x => x.tudo) }, { nome: 'Com plano', cor: 'var(--s1)', valores: pa.meses.map(x => x.pago), area: true }, { nome: 'Contratado', cor: 'var(--s3)', valores: pa.meses.map(x => x.rec), tracejado: true }],
+      tip: i => { const x = pa.meses[i]; return `<b>${nomeMes(x.m)}</b>${tipRow('var(--s2)', 'Sem plano', x.tudo)}${tipRow('var(--s1)', 'Com plano', x.pago)}${tipRow('var(--s3)', 'Receita contratada', x.rec)}${tipRow('', 'Fica para trás (acumulado)', x.acumulado)}`; } });
+    return `<section class="card"><div class="hd"><span class="eyebrow">Meu plano para atravessar o aperto</span>
+        <div class="seg" role="group" aria-label="Por quantos meses">${[1, 2, 3, 6].map(n => `<button type="button" data-act="eco-meses" data-v="${n}" aria-pressed="${pa.H === n}">${n} ${n === 1 ? 'mês' : 'meses'}</button>`).join('')}</div></div>
+      <div class="bd" style="display:flex;flex-direction:column;gap:20px">
+        <div class="fl-2" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+          <div><span>Falta pagar em ${NOMES_MES[+atual.slice(5) - 1]} com o plano</span><b class="num">${brl(m0.pago)}</b><span class="faint" style="font-size:12.5px">sem o plano: ${brl(m0.tudo)}</span></div>
+          <div><span>Por mês, média de ${pa.H} ${pa.H === 1 ? 'mês' : 'meses'}</span><b class="num">${brl(media)}</b><span class="faint" style="font-size:12.5px">sem o plano: ${brl(mediaTudo)}</span></div>
+          <div><span>Alívio por mês</span><b class="num pos">${brl(mediaTudo - media)}</b><span class="faint" style="font-size:12.5px">segurado + negociado + economias</span></div>
+          <div><span>Fica para trás em ${curto(addMes(atual, pa.H - 1))}</span><b class="num neg">${brl(pa.acumulado)}</b><span class="faint" style="font-size:12.5px">inclui ~${brl(pa.juros)} de juros e multa</span></div>
+        </div>
+        <div class="stats" style="gap:14px 28px">
+          <label class="check"><input type="checkbox" data-eco="cortes" ${eco.cortes ? 'checked' : ''}> Plano de cortes no cartão (delivery, conveniência, restaurante, assinaturas): −${brl(+G().cortes || 0)}/mês</label>
+          <label class="check"><input type="checkbox" data-eco="ads" ${eco.ads ? 'checked' : ''}> Pausar anúncios do Meta no Nubank do Ricardo: −${brl(+G().metaAds || 0)}/mês</label>
+          <label class="f" style="flex-direction:row;align-items:center;gap:8px">Corte extra no cartão por mês <input class="inp v" data-eco="extra" inputmode="decimal" value="${fmt(eco.extra || 0)}" style="max-width:120px"></label>
+        </div>
+        ${ch}
+      </div>
+      <div class="bd flush tbl-wrap" style="border-top:1px solid var(--line)"><table class="t"><thead><tr><th>Conta</th><th class="v">Valor/mês</th><th>Decisão</th><th>Risco e o que fazer</th></tr></thead><tbody>
+        ${contas.map(([id, c]) => { const d = dec[id] || 'pagar'; const v = valorConta(id, c, ativo(c, atual) ? atual : addMes(atual, 1));
+          return `<tr><td><b>${esc(c.nome)}</b><span class="nota">dia ${c.dia}${c.atrasoPct != null ? ` · atraso custa ~${String(c.atrasoPct).replace('.', ',')}% ao mês` : ''}</span></td><td class="v">${fmt(v)}</td>
+            <td>${c.grupo === 'cartao' ? '<span class="chip bad">pagar sempre o total</span>' : seg(id, d)}</td>
+            <td class="muted" style="font-size:13px;min-width:240px;max-width:520px">${esc(c.grupo === 'cartao' ? 'Rotativo de 10% a 16% ao mês. Economize no que entra na fatura (marcadores acima), não no pagamento.' : (RISCO[id] || c.cuidado || ''))}</td></tr>`; }).join('')}
+      </tbody></table></div>
+      <div class="bd flush tbl-wrap" style="border-top:1px solid var(--line)"><table class="t"><thead><tr><th>Mês</th><th class="v">Sem plano</th><th class="v">Com plano</th><th class="v">Segurado</th><th class="v">Negociado</th><th class="v">Economia no cartão</th><th class="v">Fica para trás (acumulado)</th></tr></thead><tbody>
+        ${pa.meses.map(x => `<tr><td>${nomeMes(x.m)}</td><td class="v muted">${fmt(x.tudo)}</td><td class="v"><b>${fmt(x.pago)}</b></td><td class="v">${fmt(x.seg)}</td><td class="v">${fmt(x.neg)}</td><td class="v pos">${fmt(x.eco)}</td><td class="v neg">${fmt(x.acumulado)}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="bd" style="border-top:1px solid var(--line)"><p class="p">Segurar adia a conta e ela cresce com multa e juros (estimativa pelo custo de atraso de cada uma). Negociar considera que o credor aceita adiar sem juros, o que só vale depois de combinado. Economias no cartão contam a partir da fatura do mês que vem, porque a deste mês já fechou. ${nomeMes(atual)} considera só o que ainda não foi pago.</p></div></section>`;
+  }
   function telaPrioridade() {
     const t = hoje(); const caixa = G().caixa;
     const disp = UI.disp != null ? UI.disp : (caixa != null ? +caixa : 0);
@@ -1036,7 +1123,8 @@
     const tabela = Object.values(S.config.contas).filter(c => c.atrasoPct != null).map(c => ({ nome: c.nome, pct: +c.atrasoPct, folga: c.folga, cuidado: c.cuidado, prio: c.prio })).sort((a, b) => a.pct - b.pct || b.prio - a.prio);
     const its = itensFaturas(ultimoMesComFatura());
     const soma = cs => its.filter(i => cs.includes(i.cat)).reduce((a, i) => a + i.v, 0);
-    return `${pageHead('Se faltar dinheiro', 'Diga quanto tem e até quando precisa chegar. O sistema paga primeiro o que é mais caro atrasar e mostra o custo de segurar o resto.', false)}
+    return `${pageHead('Se faltar dinheiro', 'Escolha o que pagar, o que segurar e o que negociar. O sistema mostra quanto você precisa pagar por mês e quanto fica para trás.', false)}
+    ${planoApertoHTML()}
     <section class="card"><div class="hd"><span class="eyebrow">Simulação</span></div><div class="bd">
       <form class="form" data-form="prioridade" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
         <label class="f">Quanto tenho disponível<input class="inp" id="pr-disp" name="disp" inputmode="decimal" value="${fmt(disp)}"></label>
@@ -1163,7 +1251,7 @@
     requestAnimationFrame(() => {
       renderPendente = false;
       const a = document.activeElement;
-      if (a && $('#main').contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName)) { a.addEventListener('blur', agendarRender, { once: true }); renderNav(); atualizarStatus(); return; }
+      if (a && $('#main').contains(a) && /INPUT|SELECT|TEXTAREA/.test(a.tagName) && !/checkbox|radio/.test(a.type || '')) { a.addEventListener('blur', agendarRender, { once: true }); renderNav(); atualizarStatus(); return; }
       render();
     });
   }
@@ -1242,6 +1330,8 @@
       case 'nova-conta': { const id = uid('c_'); S.config.contas[id] = { nome: 'Nova conta', valor: 0, dia: 10, grupo: 'casa', prio: 6, atrasoPct: 3, inicio: UI.mes }; salvarContas(); UI.editando = 'conta:' + id; render(); break; }
       case 'nova-entrada': { const id = uid('e_'); S.config.entradas[id] = { nome: 'Nova fonte', valor: 0, dia: 10, inicio: UI.mes }; salvarEntradas(); UI.editando = 'entrada:' + id; render(); break; }
       case 'filtro-cartao': UI.filtroCartao = d.v; UI.catSel = null; render(); break;
+      case 'dec': { const pl = S.config.plano || (S.config.plano = {}); pl.decisoes = Object.assign({}, planoConfig().dec, { [d.id]: d.v }); salvarPlano(); render(); break; }
+      case 'eco-meses': { const pl = S.config.plano || (S.config.plano = {}); pl.economias = Object.assign({}, planoConfig().eco, { meses: +d.v }); salvarPlano(); render(); break; }
       case 'quit-carro': UI.quitCarro = d.v === '1'; render(); break;
       case 'env-cartao': UI.envCartao = d.v; render(); break;
       case 'escopo': UI.escopo = d.v; UI.catSel = null; render(); break;
@@ -1267,6 +1357,11 @@
       if (el.dataset.valmes === 'conta' && md.pagos[el.dataset.id]) md.pagos[el.dataset.id].valor = r2(v);
       if (el.dataset.valmes === 'entrada' && md.recebidos[el.dataset.id]) md.recebidos[el.dataset.id].valor = r2(v);
       salvarMes(UI.mes); toast('Valor de ' + curto(UI.mes) + ' atualizado.'); agendarRender(); return;
+    }
+    if (el.dataset.eco) {
+      const pl = S.config.plano || (S.config.plano = {}); const e = planoConfig().eco;
+      if (el.dataset.eco === 'extra') { const v = P.numeroBR(el.value); e.extra = isNaN(v) ? 0 : r2(v); } else e[el.dataset.eco] = el.checked;
+      pl.economias = e; salvarPlano(); agendarRender(); return;
     }
     if (el.dataset.pend) { const pl = S.config.plano || (S.config.plano = {}); const x = (pl.pendencias || {})[el.dataset.pend]; if (x) { x.feito = el.checked; salvarPlano(); agendarRender(); } return; }
     const ac = el.dataset.actChange;
