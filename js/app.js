@@ -865,7 +865,7 @@
 
   // Quanto faturar por mês para zerar contas em aberto e dívidas em N meses.
   function quitacao(n, cen, comCarro) {
-    const atual = mesAtual(); const dv = dividas().filter(d => comCarro || d.id !== 'carro');
+    const atual = mesAtual(); const LONGOS = ['carro', 'terreno']; const dv = dividas().filter(d => comCarro || !LONGOS.includes(d.id));
     const ids = new Set(dv.map(d => d.id));
     const parcelaDe = (id, m) => { const c = S.config.contas[id]; if (!c || !ativo(c, m)) return 0; return c.parcelas ? (+c.parcelas[m] || 0) : valorConta(id, c, m); };
     // em aberto que não é parcela de dívida (contas do mês vencidas ou a vencer)
@@ -875,7 +875,8 @@
       if (!ids.has(it.id)) abertoContas += it.valor;
       else if (S.config.contas[it.id].parcelas) abertoContas += Math.max(0, it.valor - parcelaDe(it.id, m)); // fatura do cartão: só as parcelas são dívida
     }
-    const saldoDividas = dv.reduce((a, d) => a + d.atual, 0);
+    // quitação antecipada sai pelo saldo devedor estimado, não pela soma das parcelas
+    const saldoDividas = dv.reduce((a, d) => a + d.atual * (+(S.config.contas[d.id] || {}).quitacaoFator || 1), 0);
     const alvo = abertoContas + saldoDividas;
     let base = 0, rec = 0;
     for (let i = 1; i <= n; i++) {
@@ -894,7 +895,7 @@
     const q12 = prazos[1];
     const mx = Math.max(...prazos.map(q => q.necessario), 1);
     return `<section class="card"><div class="hd"><span class="eyebrow">Quanto preciso faturar para quitar tudo</span>
-        <div class="seg" role="group" aria-label="Incluir o carro"><button type="button" data-act="quit-carro" data-v="1" aria-pressed="${comCarro}">Todas as dívidas</button><button type="button" data-act="quit-carro" data-v="0" aria-pressed="${!comCarro}">Sem antecipar o carro</button></div></div>
+        <div class="seg" role="group" aria-label="Incluir o carro"><button type="button" data-act="quit-carro" data-v="1" aria-pressed="${comCarro}">Todas as dívidas</button><button type="button" data-act="quit-carro" data-v="0" aria-pressed="${!comCarro}">Sem antecipar carro e terreno</button></div></div>
       <div class="bd" style="display:flex;flex-direction:column;gap:20px">
         <div class="fl-tot"><span>Para zerar tudo em 12 meses, faturar por mês</span><b class="num">${brl(q12.necessario)}</b></div>
         <div class="fl-2" style="grid-template-columns:repeat(3,minmax(0,1fr))">
@@ -913,7 +914,7 @@
         ${prazos.map(q => `<tr${q.n === 12 ? ' style="background:var(--surface-2)"' : ''}><td><b>${q.n} meses</b> <span class="faint">até ${curto(addMes(mesAtual(), q.n))}</span></td><td class="v"><b>${fmt(q.necessario)}</b></td><td class="v muted">${fmt(q.rec)}</td><td class="v neg">${fmt(q.falta)}</td><td class="v">${fmt(q.porDia)}</td>
           <td><div class="fl-bar" style="height:8px"><span style="width:${q.necessario / mx * 100}%;background:var(--s2)"></span></div></td></tr>`).join('')}
       </tbody></table></div>
-      <div class="bd" style="border-top:1px solid var(--line)"><p class="p">Faturamento necessário = custo do dia a dia (contas e cartões sem as parcelas das dívidas) + tudo o que está em aberto dividido pelo número de meses. Entram: ${q12.dv.map(d => `${esc(d.nome)} ${k(d.atual)}`).join(', ')}${comCarro ? '' : '. O carro segue nas parcelas normais e fica dentro do custo do dia a dia'}. Os cenários acima (pausar anúncios e cortes) já entram no cálculo. As próximas parcelas do Pronampe não estão incluídas porque o saldo dos contratos ainda não foi informado.</p></div></section>`;
+      <div class="bd" style="border-top:1px solid var(--line)"><p class="p">Faturamento necessário = custo do dia a dia (contas e cartões sem as parcelas das dívidas) + tudo o que está em aberto dividido pelo número de meses. Entram: ${q12.dv.map(d => `${esc(d.nome)} ${k(d.atual * (+(S.config.contas[d.id] || {}).quitacaoFator || 1))}`).join(', ')}${comCarro ? '. O terreno entra pelo saldo para quitar antecipado (estimado), não pela soma das parcelas' : '. Carro e terreno seguem nas parcelas normais e ficam dentro do custo do dia a dia'}. Os cenários acima (pausar anúncios e cortes) já entram no cálculo. As próximas parcelas do Pronampe não estão incluídas porque o saldo dos contratos ainda não foi informado.</p></div></section>`;
   }
   function telaProjecao() {
     const cen = UI.cen; const pr = projecao(12, cen); const ms = pr.meses;
